@@ -1296,6 +1296,38 @@
 
       .hidden { display: none; }
 
+      .reminder-settings-grid {
+        margin-top: 0.62rem;
+        display: grid;
+        gap: 0.5rem;
+      }
+
+      .reminder-settings-title {
+        margin: 0;
+        font-size: 0.78rem;
+        font-weight: 700;
+        color: #3a6059;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      .reminder-note {
+        margin: 0;
+        font-size: 0.74rem;
+        color: #5d7772;
+        line-height: 1.35;
+      }
+
+      .reminder-actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.42rem;
+      }
+
+      .reminder-control-status {
+        margin-top: 0.1rem;
+      }
+
       .profile-row {
         margin-top: 0.56rem;
         border: none;
@@ -2225,6 +2257,14 @@
         background: rgba(255, 255, 255, 0.68);
       }
 
+      body.modern-ui .reminder-settings-title {
+        color: #305463;
+      }
+
+      body.modern-ui .reminder-note {
+        color: #5d7684;
+      }
+
       body.modern-ui .profile-key {
         color: #5f7885;
         font-weight: 700;
@@ -3097,6 +3137,81 @@
             <label class="switch"><input id="appReminderToggle" type="checkbox" /><span class="slider"></span></label>
           </div>
 
+          <div class="reminder-settings-grid">
+            <p class="reminder-settings-title">Advanced Reminder Logic</p>
+
+            <div class="toggle">
+              <span>Follow-up nudge (pending only)</span>
+              <label class="switch"><input id="followupToggle" type="checkbox" /><span class="slider"></span></label>
+            </div>
+            <div class="field">
+              <label class="label" for="followupDelayMinutes">Follow-up Delay (minutes)</label>
+              <input id="followupDelayMinutes" class="input" type="number" min="5" max="360" step="5" />
+            </div>
+
+            <div class="toggle">
+              <span>Last chance alert before day ends</span>
+              <label class="switch"><input id="lastChanceToggle" type="checkbox" /><span class="slider"></span></label>
+            </div>
+            <div class="field">
+              <label class="label" for="lastChanceTime">Daily Cutoff Time</label>
+              <input id="lastChanceTime" class="time" type="time" />
+            </div>
+
+            <div class="toggle">
+              <span>Streak risk alert for high streaks</span>
+              <label class="switch"><input id="riskAlertToggle" type="checkbox" /><span class="slider"></span></label>
+            </div>
+            <div class="two">
+              <div class="field">
+                <label class="label" for="riskThresholdDays">Risk Threshold (days)</label>
+                <input id="riskThresholdDays" class="input" type="number" min="1" max="3650" />
+              </div>
+              <div class="field">
+                <label class="label" for="riskLeadMinutes">Risk Lead (minutes)</label>
+                <input id="riskLeadMinutes" class="input" type="number" min="5" max="360" step="5" />
+              </div>
+            </div>
+
+            <div class="toggle">
+              <span>Weekly planning reminder (Sunday)</span>
+              <label class="switch"><input id="weeklyPlanningToggle" type="checkbox" /><span class="slider"></span></label>
+            </div>
+            <div class="field">
+              <label class="label" for="weeklyPlanningTime">Sunday Reminder Time</label>
+              <input id="weeklyPlanningTime" class="time" type="time" />
+            </div>
+
+            <div class="toggle">
+              <span>Quiet hours</span>
+              <label class="switch"><input id="quietHoursToggle" type="checkbox" /><span class="slider"></span></label>
+            </div>
+            <div class="two">
+              <div class="field">
+                <label class="label" for="quietHoursStart">Quiet Start</label>
+                <input id="quietHoursStart" class="time" type="time" />
+              </div>
+              <div class="field">
+                <label class="label" for="quietHoursEnd">Quiet End</label>
+                <input id="quietHoursEnd" class="time" type="time" />
+              </div>
+            </div>
+
+            <div class="field">
+              <label class="label" for="snoozeMinutesInput">Snooze Minutes</label>
+              <input id="snoozeMinutesInput" class="input" type="number" min="5" max="720" step="5" />
+            </div>
+
+            <div class="reminder-actions">
+              <button id="snoozeReminderBtn" class="btn btn-soft" type="button">Snooze</button>
+              <button id="clearSnoozeBtn" class="btn btn-ghost" type="button">Clear Snooze</button>
+            </div>
+
+            <button id="saveReminderSettingsBtn" class="btn btn-soft" type="button" style="width: 100%;">Save Reminder Logic</button>
+            <p id="reminderControlStatus" class="status reminder-control-status" aria-live="polite"></p>
+            <p class="reminder-note">Follow-up, last chance, and risk alerts are sent only when that streak is still pending.</p>
+          </div>
+
           <p id="notificationState" class="status" style="margin-top: 0.62rem;">Permission: unknown</p>
           <button id="allowNotificationBtn" class="btn btn-ghost" type="button" style="width: 100%;">Allow Notifications</button>
           <button id="profileLogoutBtn" class="btn btn-main" type="button" style="width: 100%; margin-top: 0.55rem;">Logout</button>
@@ -3254,7 +3369,28 @@
       const STREAK_DELETE_API = (id) => `${STREAKS_API}/${id}`;
       const AUTH_ME_API = `${API_ORIGIN}/api/auth/me`;
       const AUTH_LOGOUT_API = `${API_ORIGIN}/api/auth/logout`;
+      const REMINDER_SETTINGS_API = `${API_ORIGIN}/api/reminders/settings`;
+      const REMINDER_SNOOZE_API = `${API_ORIGIN}/api/reminders/snooze`;
+      const REMINDER_TRIGGER_API = `${API_ORIGIN}/api/reminders/trigger-now`;
       const APP_REMINDER_KEY = "streak_app_reminders_enabled";
+      const APP_REMINDER_SETTINGS_KEY = "streak_app_reminder_settings_v2";
+      const APP_REMINDER_SNOOZE_UNTIL_KEY = "streak_app_reminder_snooze_until";
+      const REMINDER_EVENT_DEDUP_MS = 45000;
+      const DEFAULT_REMINDER_SETTINGS = Object.freeze({
+        followUpEnabled: true,
+        followUpDelayMinutes: 75,
+        lastChanceEnabled: true,
+        lastChanceTime: "22:30",
+        riskAlertEnabled: true,
+        riskThresholdDays: 5,
+        riskLeadMinutes: 45,
+        weeklyPlanningEnabled: true,
+        weeklyPlanningTime: "18:00",
+        quietHoursEnabled: false,
+        quietHoursStart: "23:00",
+        quietHoursEnd: "07:00",
+        snoozeMinutes: 30,
+      });
       const STREAK_NAME_MAX_LENGTH = 48;
       const STREAK_COLOR_POOL = [
         "#FF5733",
@@ -3393,6 +3529,23 @@
       const profileEmail = document.getElementById("profileEmail");
       const profileActive = document.getElementById("profileActive");
       const appReminderToggle = document.getElementById("appReminderToggle");
+      const followupToggle = document.getElementById("followupToggle");
+      const followupDelayMinutesInput = document.getElementById("followupDelayMinutes");
+      const lastChanceToggle = document.getElementById("lastChanceToggle");
+      const lastChanceTimeInput = document.getElementById("lastChanceTime");
+      const riskAlertToggle = document.getElementById("riskAlertToggle");
+      const riskThresholdDaysInput = document.getElementById("riskThresholdDays");
+      const riskLeadMinutesInput = document.getElementById("riskLeadMinutes");
+      const weeklyPlanningToggle = document.getElementById("weeklyPlanningToggle");
+      const weeklyPlanningTimeInput = document.getElementById("weeklyPlanningTime");
+      const quietHoursToggle = document.getElementById("quietHoursToggle");
+      const quietHoursStartInput = document.getElementById("quietHoursStart");
+      const quietHoursEndInput = document.getElementById("quietHoursEnd");
+      const snoozeMinutesInput = document.getElementById("snoozeMinutesInput");
+      const snoozeReminderBtn = document.getElementById("snoozeReminderBtn");
+      const clearSnoozeBtn = document.getElementById("clearSnoozeBtn");
+      const saveReminderSettingsBtn = document.getElementById("saveReminderSettingsBtn");
+      const reminderControlStatus = document.getElementById("reminderControlStatus");
       const notificationState = document.getElementById("notificationState");
       const allowNotificationBtn = document.getElementById("allowNotificationBtn");
       const profileLogoutBtn = document.getElementById("profileLogoutBtn");
@@ -3404,6 +3557,7 @@
       let currentUser = null;
       let calendarMonthCursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
       const reminderTimers = new Map();
+      const recentReminderEvents = new Map();
       let lockedBodyScrollY = 0;
       let bodyScrollLockDepth = 0;
       let shareStreakId = null;
@@ -3439,6 +3593,13 @@
 
       function setProfileStatus(message, type = "") {
         setStatus(profileStatus, message, type);
+      }
+
+      function setReminderControlStatus(message, type = "") {
+        if (!reminderControlStatus) {
+          return;
+        }
+        setStatus(reminderControlStatus, message, type);
       }
 
       function lockBodyScroll() {
@@ -4688,6 +4849,388 @@
         localStorage.setItem(APP_REMINDER_KEY, value ? "1" : "0");
       }
 
+      function clampInteger(value, min, max, fallback) {
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed)) {
+          return fallback;
+        }
+        const rounded = Math.round(parsed);
+        if (rounded < min || rounded > max) {
+          return fallback;
+        }
+        return rounded;
+      }
+
+      function parseTimeParts(value) {
+        const raw = String(value || "").trim();
+        const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(raw);
+        if (!match) {
+          return null;
+        }
+        return {
+          hour: Number(match[1]),
+          minute: Number(match[2]),
+        };
+      }
+
+      function sanitizeReminderSettings(value = {}) {
+        const safe = value && typeof value === "object" ? value : {};
+
+        const followUpEnabled = safe.followUpEnabled !== undefined
+          ? Boolean(safe.followUpEnabled)
+          : DEFAULT_REMINDER_SETTINGS.followUpEnabled;
+        const followUpDelayMinutes = clampInteger(
+          safe.followUpDelayMinutes,
+          5,
+          360,
+          DEFAULT_REMINDER_SETTINGS.followUpDelayMinutes
+        );
+
+        const lastChanceEnabled = safe.lastChanceEnabled !== undefined
+          ? Boolean(safe.lastChanceEnabled)
+          : DEFAULT_REMINDER_SETTINGS.lastChanceEnabled;
+        const lastChanceTime = parseTimeParts(safe.lastChanceTime)
+          ? String(safe.lastChanceTime)
+          : DEFAULT_REMINDER_SETTINGS.lastChanceTime;
+
+        const riskAlertEnabled = safe.riskAlertEnabled !== undefined
+          ? Boolean(safe.riskAlertEnabled)
+          : DEFAULT_REMINDER_SETTINGS.riskAlertEnabled;
+        const riskThresholdDays = clampInteger(
+          safe.riskThresholdDays,
+          1,
+          3650,
+          DEFAULT_REMINDER_SETTINGS.riskThresholdDays
+        );
+        const riskLeadMinutes = clampInteger(
+          safe.riskLeadMinutes,
+          5,
+          360,
+          DEFAULT_REMINDER_SETTINGS.riskLeadMinutes
+        );
+
+        const weeklyPlanningEnabled = safe.weeklyPlanningEnabled !== undefined
+          ? Boolean(safe.weeklyPlanningEnabled)
+          : DEFAULT_REMINDER_SETTINGS.weeklyPlanningEnabled;
+        const weeklyPlanningTime = parseTimeParts(safe.weeklyPlanningTime)
+          ? String(safe.weeklyPlanningTime)
+          : DEFAULT_REMINDER_SETTINGS.weeklyPlanningTime;
+
+        const quietHoursEnabled = safe.quietHoursEnabled !== undefined
+          ? Boolean(safe.quietHoursEnabled)
+          : DEFAULT_REMINDER_SETTINGS.quietHoursEnabled;
+        const quietHoursStart = parseTimeParts(safe.quietHoursStart)
+          ? String(safe.quietHoursStart)
+          : DEFAULT_REMINDER_SETTINGS.quietHoursStart;
+        const quietHoursEnd = parseTimeParts(safe.quietHoursEnd)
+          ? String(safe.quietHoursEnd)
+          : DEFAULT_REMINDER_SETTINGS.quietHoursEnd;
+
+        const snoozeMinutes = clampInteger(
+          safe.snoozeMinutes,
+          5,
+          720,
+          DEFAULT_REMINDER_SETTINGS.snoozeMinutes
+        );
+
+        return {
+          followUpEnabled,
+          followUpDelayMinutes,
+          lastChanceEnabled,
+          lastChanceTime,
+          riskAlertEnabled,
+          riskThresholdDays,
+          riskLeadMinutes,
+          weeklyPlanningEnabled,
+          weeklyPlanningTime,
+          quietHoursEnabled,
+          quietHoursStart,
+          quietHoursEnd,
+          snoozeMinutes,
+        };
+      }
+
+      function getReminderSettings() {
+        try {
+          const raw = localStorage.getItem(APP_REMINDER_SETTINGS_KEY);
+          if (!raw) {
+            return sanitizeReminderSettings(DEFAULT_REMINDER_SETTINGS);
+          }
+          return sanitizeReminderSettings(JSON.parse(raw));
+        } catch {
+          return sanitizeReminderSettings(DEFAULT_REMINDER_SETTINGS);
+        }
+      }
+
+      function setReminderSettings(value) {
+        const sanitized = sanitizeReminderSettings(value);
+        localStorage.setItem(APP_REMINDER_SETTINGS_KEY, JSON.stringify(sanitized));
+        return sanitized;
+      }
+
+      function getSnoozeUntilTimestamp() {
+        const parsed = Number(localStorage.getItem(APP_REMINDER_SNOOZE_UNTIL_KEY) || 0);
+        if (!Number.isFinite(parsed) || parsed <= Date.now()) {
+          localStorage.removeItem(APP_REMINDER_SNOOZE_UNTIL_KEY);
+          return 0;
+        }
+        return parsed;
+      }
+
+      function setSnoozeUntilTimestamp(value) {
+        const next = Number(value);
+        if (!Number.isFinite(next) || next <= Date.now()) {
+          localStorage.removeItem(APP_REMINDER_SNOOZE_UNTIL_KEY);
+          return 0;
+        }
+        localStorage.setItem(APP_REMINDER_SNOOZE_UNTIL_KEY, String(Math.floor(next)));
+        return Math.floor(next);
+      }
+
+      function clearReminderSnooze() {
+        localStorage.removeItem(APP_REMINDER_SNOOZE_UNTIL_KEY);
+      }
+
+      function formatReminderDateTime(timestamp) {
+        const date = new Date(Number(timestamp) || Date.now());
+        return new Intl.DateTimeFormat("en-US", {
+          weekday: "short",
+          month: "short",
+          day: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+        }).format(date);
+      }
+
+      function getDateMinutes(date) {
+        return date.getHours() * 60 + date.getMinutes();
+      }
+
+      function isAlwaysQuiet(settings) {
+        const start = parseTimeParts(settings.quietHoursStart);
+        const end = parseTimeParts(settings.quietHoursEnd);
+        if (!start || !end) {
+          return false;
+        }
+        return start.hour === end.hour && start.minute === end.minute;
+      }
+
+      function isInsideQuietHours(date, settings) {
+        if (!settings.quietHoursEnabled) {
+          return false;
+        }
+
+        const start = parseTimeParts(settings.quietHoursStart);
+        const end = parseTimeParts(settings.quietHoursEnd);
+        if (!start || !end) {
+          return false;
+        }
+
+        if (start.hour === end.hour && start.minute === end.minute) {
+          return true;
+        }
+
+        const current = getDateMinutes(date);
+        const startMinutes = start.hour * 60 + start.minute;
+        const endMinutes = end.hour * 60 + end.minute;
+        if (startMinutes < endMinutes) {
+          return current >= startMinutes && current < endMinutes;
+        }
+        return current >= startMinutes || current < endMinutes;
+      }
+
+      function getQuietHoursEndDate(date, settings) {
+        const end = parseTimeParts(settings.quietHoursEnd);
+        const start = parseTimeParts(settings.quietHoursStart);
+        if (!start || !end) {
+          return new Date(date);
+        }
+
+        const next = new Date(date);
+        const current = getDateMinutes(date);
+        const startMinutes = start.hour * 60 + start.minute;
+        const endMinutes = end.hour * 60 + end.minute;
+
+        if (startMinutes < endMinutes) {
+          next.setHours(end.hour, end.minute, 0, 0);
+          if (current >= endMinutes) {
+            next.setDate(next.getDate() + 1);
+          }
+          return next;
+        }
+
+        if (current >= startMinutes) {
+          next.setDate(next.getDate() + 1);
+          next.setHours(end.hour, end.minute, 0, 0);
+          return next;
+        }
+
+        next.setHours(end.hour, end.minute, 0, 0);
+        return next;
+      }
+
+      function applyReminderRuntimeGates(targetDate, settings, options = {}) {
+        const {
+          allowQuietShift = true,
+          preserveDate = false,
+          sourceDateStr = "",
+        } = options;
+
+        let adjusted = new Date(targetDate);
+
+        const snoozeUntil = getSnoozeUntilTimestamp();
+        if (snoozeUntil && adjusted.getTime() < snoozeUntil) {
+          adjusted = new Date(snoozeUntil);
+        }
+
+        if (settings.quietHoursEnabled) {
+          if (isAlwaysQuiet(settings)) {
+            return null;
+          }
+
+          if (allowQuietShift) {
+            let guard = 0;
+            while (isInsideQuietHours(adjusted, settings) && guard < 4) {
+              adjusted = getQuietHoursEndDate(adjusted, settings);
+              guard += 1;
+            }
+            if (isInsideQuietHours(adjusted, settings)) {
+              return null;
+            }
+          } else if (isInsideQuietHours(adjusted, settings)) {
+            return null;
+          }
+        }
+
+        if (preserveDate && sourceDateStr && formatLocalDate(adjusted) !== sourceDateStr) {
+          return null;
+        }
+
+        return adjusted;
+      }
+
+      function isStreakDateInPlan(streak, dateStr) {
+        const startDate = getStartDate(streak);
+        const endDate = getEndDate(streak);
+        if (dateStr < startDate) {
+          return false;
+        }
+        if (endDate && dateStr > endDate) {
+          return false;
+        }
+        return true;
+      }
+
+      function getDateAtTime(date, timeValue) {
+        const parts = parseTimeParts(timeValue);
+        if (!parts) {
+          return null;
+        }
+        return new Date(date.getFullYear(), date.getMonth(), date.getDate(), parts.hour, parts.minute, 0, 0);
+      }
+
+      function getFollowUpDateAt(date, reminderTime, delayMinutes) {
+        const base = getDateAtTime(date, reminderTime);
+        if (!base) {
+          return null;
+        }
+        const sourceDateStr = formatLocalDate(date);
+        base.setMinutes(base.getMinutes() + delayMinutes);
+        if (formatLocalDate(base) !== sourceDateStr) {
+          return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 55, 0, 0);
+        }
+        return base;
+      }
+
+      function getRiskAlertDateAt(date, cutoffTime, leadMinutes) {
+        const cutoffDate = getDateAtTime(date, cutoffTime);
+        if (!cutoffDate) {
+          return null;
+        }
+        cutoffDate.setMinutes(cutoffDate.getMinutes() - leadMinutes);
+        const sourceDateStr = formatLocalDate(date);
+        if (formatLocalDate(cutoffDate) !== sourceDateStr) {
+          return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 5, 0, 0);
+        }
+        return cutoffDate;
+      }
+
+      function findNextStreakEventTime(streak, buildDateForDay, now, settings, options = {}) {
+        const todayStr = getTodayDateString();
+        const todayDate = parseDateFromYmd(todayStr)
+          || new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const logs = getNormalizedLogSet(streak);
+
+        for (let offset = 0; offset <= 21; offset += 1) {
+          const dayDate = new Date(todayDate);
+          dayDate.setDate(todayDate.getDate() + offset);
+          const dayStr = formatLocalDate(dayDate);
+
+          if (!isStreakDateInPlan(streak, dayStr)) {
+            continue;
+          }
+          if (logs.has(dayStr)) {
+            continue;
+          }
+
+          const rawTarget = buildDateForDay(dayDate, dayStr);
+          if (!rawTarget) {
+            continue;
+          }
+
+          const adjustedTarget = applyReminderRuntimeGates(rawTarget, settings, {
+            allowQuietShift: options.allowQuietShift !== false,
+            preserveDate: options.preserveDate !== false,
+            sourceDateStr: dayStr,
+          });
+          if (!adjustedTarget) {
+            continue;
+          }
+          if (adjustedTarget.getTime() <= now.getTime()) {
+            continue;
+          }
+
+          return { time: adjustedTarget, dayStr };
+        }
+
+        return null;
+      }
+
+      function pruneRecentReminderEvents() {
+        const now = Date.now();
+        recentReminderEvents.forEach((timestamp, key) => {
+          if (now - timestamp > REMINDER_EVENT_DEDUP_MS) {
+            recentReminderEvents.delete(key);
+          }
+        });
+      }
+
+      function wasReminderEventRecentlySent(eventKey) {
+        pruneRecentReminderEvents();
+        const last = recentReminderEvents.get(eventKey);
+        return Number.isFinite(last) && Date.now() - last < REMINDER_EVENT_DEDUP_MS;
+      }
+
+      function markReminderEventSent(eventKey) {
+        recentReminderEvents.set(eventKey, Date.now());
+      }
+
+      function notifyReminder(title, body, vibratePattern = null) {
+        if ("Notification" in window && Notification.permission === "granted") {
+          try {
+            new Notification(title, { body });
+          } catch {
+            setGlobalStatus(`${title}: ${body}`, "success");
+          }
+        } else {
+          setGlobalStatus(`${title}: ${body}`, "success");
+        }
+
+        if (vibratePattern && navigator.vibrate) {
+          navigator.vibrate(vibratePattern);
+        }
+      }
+
       async function apiRequest(url, options = {}) {
         const token = getToken();
         if (!token) {
@@ -5339,6 +5882,242 @@
         reminderTimeInput.required = enabled;
       }
 
+      function updateReminderControlFieldState() {
+        if (followupDelayMinutesInput) {
+          followupDelayMinutesInput.disabled = !Boolean(followupToggle && followupToggle.checked);
+        }
+        if (lastChanceTimeInput) {
+          lastChanceTimeInput.disabled = !Boolean(lastChanceToggle && lastChanceToggle.checked);
+        }
+
+        const riskEnabled = Boolean(riskAlertToggle && riskAlertToggle.checked);
+        if (riskThresholdDaysInput) {
+          riskThresholdDaysInput.disabled = !riskEnabled;
+        }
+        if (riskLeadMinutesInput) {
+          riskLeadMinutesInput.disabled = !riskEnabled;
+        }
+
+        if (weeklyPlanningTimeInput) {
+          weeklyPlanningTimeInput.disabled = !Boolean(weeklyPlanningToggle && weeklyPlanningToggle.checked);
+        }
+
+        const quietEnabled = Boolean(quietHoursToggle && quietHoursToggle.checked);
+        if (quietHoursStartInput) {
+          quietHoursStartInput.disabled = !quietEnabled;
+        }
+        if (quietHoursEndInput) {
+          quietHoursEndInput.disabled = !quietEnabled;
+        }
+      }
+
+      function renderReminderControls() {
+        const settings = getReminderSettings();
+
+        if (followupToggle) {
+          followupToggle.checked = settings.followUpEnabled;
+        }
+        if (followupDelayMinutesInput) {
+          followupDelayMinutesInput.value = String(settings.followUpDelayMinutes);
+        }
+
+        if (lastChanceToggle) {
+          lastChanceToggle.checked = settings.lastChanceEnabled;
+        }
+        if (lastChanceTimeInput) {
+          lastChanceTimeInput.value = settings.lastChanceTime;
+        }
+
+        if (riskAlertToggle) {
+          riskAlertToggle.checked = settings.riskAlertEnabled;
+        }
+        if (riskThresholdDaysInput) {
+          riskThresholdDaysInput.value = String(settings.riskThresholdDays);
+        }
+        if (riskLeadMinutesInput) {
+          riskLeadMinutesInput.value = String(settings.riskLeadMinutes);
+        }
+
+        if (weeklyPlanningToggle) {
+          weeklyPlanningToggle.checked = settings.weeklyPlanningEnabled;
+        }
+        if (weeklyPlanningTimeInput) {
+          weeklyPlanningTimeInput.value = settings.weeklyPlanningTime;
+        }
+
+        if (quietHoursToggle) {
+          quietHoursToggle.checked = settings.quietHoursEnabled;
+        }
+        if (quietHoursStartInput) {
+          quietHoursStartInput.value = settings.quietHoursStart;
+        }
+        if (quietHoursEndInput) {
+          quietHoursEndInput.value = settings.quietHoursEnd;
+        }
+
+        if (snoozeMinutesInput) {
+          snoozeMinutesInput.value = String(settings.snoozeMinutes);
+        }
+
+        const snoozeUntil = getSnoozeUntilTimestamp();
+        if (snoozeUntil) {
+          setReminderControlStatus(`Snoozed until ${formatReminderDateTime(snoozeUntil)}.`, "success");
+        } else {
+          setReminderControlStatus("No active snooze.");
+        }
+
+        updateReminderControlFieldState();
+      }
+
+      function getReminderSettingsFromInputs() {
+        const nextSettings = {
+          followUpEnabled: Boolean(followupToggle && followupToggle.checked),
+          followUpDelayMinutes: Number(followupDelayMinutesInput?.value || 0),
+          lastChanceEnabled: Boolean(lastChanceToggle && lastChanceToggle.checked),
+          lastChanceTime: String(lastChanceTimeInput?.value || "").trim(),
+          riskAlertEnabled: Boolean(riskAlertToggle && riskAlertToggle.checked),
+          riskThresholdDays: Number(riskThresholdDaysInput?.value || 0),
+          riskLeadMinutes: Number(riskLeadMinutesInput?.value || 0),
+          weeklyPlanningEnabled: Boolean(weeklyPlanningToggle && weeklyPlanningToggle.checked),
+          weeklyPlanningTime: String(weeklyPlanningTimeInput?.value || "").trim(),
+          quietHoursEnabled: Boolean(quietHoursToggle && quietHoursToggle.checked),
+          quietHoursStart: String(quietHoursStartInput?.value || "").trim(),
+          quietHoursEnd: String(quietHoursEndInput?.value || "").trim(),
+          snoozeMinutes: Number(snoozeMinutesInput?.value || 0),
+        };
+
+        if (nextSettings.followUpEnabled && !Number.isInteger(nextSettings.followUpDelayMinutes)) {
+          throw new Error("Follow-up delay should be a whole number.");
+        }
+        if (nextSettings.followUpEnabled && (nextSettings.followUpDelayMinutes < 5 || nextSettings.followUpDelayMinutes > 360)) {
+          throw new Error("Follow-up delay should be between 5 and 360 minutes.");
+        }
+
+        if (nextSettings.lastChanceEnabled && !parseTimeParts(nextSettings.lastChanceTime)) {
+          throw new Error("Last chance time should be in HH:MM format.");
+        }
+
+        if (nextSettings.riskAlertEnabled) {
+          if (!Number.isInteger(nextSettings.riskThresholdDays) || nextSettings.riskThresholdDays < 1 || nextSettings.riskThresholdDays > 3650) {
+            throw new Error("Risk threshold should be between 1 and 3650 days.");
+          }
+          if (!Number.isInteger(nextSettings.riskLeadMinutes) || nextSettings.riskLeadMinutes < 5 || nextSettings.riskLeadMinutes > 360) {
+            throw new Error("Risk lead should be between 5 and 360 minutes.");
+          }
+        }
+
+        if (nextSettings.weeklyPlanningEnabled && !parseTimeParts(nextSettings.weeklyPlanningTime)) {
+          throw new Error("Weekly planning time should be in HH:MM format.");
+        }
+
+        if (nextSettings.quietHoursEnabled) {
+          if (!parseTimeParts(nextSettings.quietHoursStart) || !parseTimeParts(nextSettings.quietHoursEnd)) {
+            throw new Error("Quiet hours start/end should be in HH:MM format.");
+          }
+        }
+
+        if (!Number.isInteger(nextSettings.snoozeMinutes) || nextSettings.snoozeMinutes < 5 || nextSettings.snoozeMinutes > 720) {
+          throw new Error("Snooze minutes should be between 5 and 720.");
+        }
+
+        return sanitizeReminderSettings(nextSettings);
+      }
+
+      async function syncReminderSettingsFromServer() {
+        try {
+          const data = await apiRequest(REMINDER_SETTINGS_API);
+          if (data && data.settings) {
+            const sanitized = sanitizeReminderSettings(data.settings);
+            setReminderSettings({
+              ...sanitized,
+              snoozeUntil: data.settings.snoozeUntil || null,
+            });
+            if (data.settings.snoozeUntil) {
+              const parsed = new Date(data.settings.snoozeUntil);
+              if (!Number.isNaN(parsed.getTime())) {
+                setSnoozeUntilTimestamp(parsed.getTime());
+              }
+            } else {
+              clearReminderSnooze();
+            }
+            renderReminderControls();
+          }
+        } catch {
+          // Keep local settings fallback when backend settings API is unavailable.
+        }
+      }
+
+      async function saveReminderSettingsFromUI() {
+        const nextSettings = getReminderSettingsFromInputs();
+        const saved = setReminderSettings(nextSettings);
+        if (snoozeMinutesInput) {
+          snoozeMinutesInput.value = String(saved.snoozeMinutes);
+        }
+        updateReminderControlFieldState();
+        let syncedWithBackend = true;
+        try {
+          const data = await apiRequest(REMINDER_SETTINGS_API, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(nextSettings),
+          });
+          if (data && data.settings) {
+            const serverSettings = sanitizeReminderSettings(data.settings);
+            setReminderSettings({
+              ...serverSettings,
+              snoozeUntil: data.settings.snoozeUntil || null,
+            });
+            if (data.settings.snoozeUntil) {
+              const parsed = new Date(data.settings.snoozeUntil);
+              if (!Number.isNaN(parsed.getTime())) {
+                setSnoozeUntilTimestamp(parsed.getTime());
+              }
+            }
+          }
+        } catch {
+          syncedWithBackend = false;
+          setProfileStatus("Saved locally. Backend settings sync failed.", "error");
+        }
+        scheduleAllReminders();
+        if (syncedWithBackend) {
+          setProfileStatus("Reminder logic saved.", "success");
+        }
+        return saved;
+      }
+
+      async function applyReminderSnoozeFromInput() {
+        const settings = getReminderSettings();
+        const minutes = clampInteger(snoozeMinutesInput?.value, 5, 720, settings.snoozeMinutes);
+        if (snoozeMinutesInput) {
+          snoozeMinutesInput.value = String(minutes);
+        }
+        let until = setSnoozeUntilTimestamp(Date.now() + minutes * 60 * 1000);
+        try {
+          const data = await apiRequest(REMINDER_SNOOZE_API, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ minutes }),
+          });
+          if (data && data.settings) {
+            const serverSettings = sanitizeReminderSettings(data.settings);
+            setReminderSettings({
+              ...serverSettings,
+              snoozeUntil: data.settings.snoozeUntil || null,
+            });
+          }
+          if (data && data.snoozeUntil) {
+            const parsed = new Date(data.snoozeUntil);
+            if (!Number.isNaN(parsed.getTime())) {
+              until = setSnoozeUntilTimestamp(parsed.getTime());
+            }
+          }
+        } catch {
+          // Keep local snooze if backend call fails.
+        }
+        setReminderControlStatus(`Snoozed until ${formatReminderDateTime(until)}.`, "success");
+        scheduleAllReminders();
+      }
+
       function renderSummary() {
         const today = getTodayDateString();
         const activeStreaks = getActiveStreaks();
@@ -5914,6 +6693,7 @@
         profileName.textContent = user.name || "-";
         profileEmail.textContent = user.email || "-";
         appReminderToggle.checked = isAppReminderEnabled();
+        renderReminderControls();
 
         if (!("Notification" in window)) {
           notificationState.textContent = "Permission: Notification API not supported";
@@ -5943,108 +6723,271 @@
         reminderTimers.clear();
       }
 
-      function getReminderTarget(streak) {
+      function buildStreakReminderEvents(streak, now, settings) {
+        const events = [];
+        const streakId = getStreakId(streak);
+        if (!streakId) {
+          return events;
+        }
         if (isArchivedStreak(streak) || isCompletedStreak(streak)) {
-          return null;
+          return events;
+        }
+        if (!streak.reminderEnabled || !parseTimeParts(streak.reminderTime)) {
+          return events;
         }
 
-        if (!isAppReminderEnabled() || !streak.reminderEnabled || !streak.reminderTime) {
-          return null;
+        const primary = findNextStreakEventTime(
+          streak,
+          (dayDate) => getDateAtTime(dayDate, streak.reminderTime),
+          now,
+          settings,
+          { allowQuietShift: true, preserveDate: true }
+        );
+        if (primary) {
+          events.push({
+            key: `primary:${streakId}:${primary.dayStr}`,
+            type: "primary",
+            streakId,
+            dayStr: primary.dayStr,
+            time: primary.time,
+          });
         }
 
-        const parts = String(streak.reminderTime).split(":");
-        if (parts.length !== 2) {
-          return null;
-        }
-
-        const hour = Number(parts[0]);
-        const minute = Number(parts[1]);
-        if (!Number.isInteger(hour) || !Number.isInteger(minute)) {
-          return null;
-        }
-
-        const now = new Date();
-        const today = getTodayDateString();
-        const startDateStr = getStartDate(streak);
-        const endDateStr = getEndDate(streak);
-        const logs = getNormalizedLogArray(streak);
-
-        let target = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hour, minute, 0, 0);
-        if (today < startDateStr) {
-          const startDate = parseDateFromYmd(startDateStr);
-          if (!startDate) {
-            return null;
+        if (settings.followUpEnabled) {
+          const followUp = findNextStreakEventTime(
+            streak,
+            (dayDate) => getFollowUpDateAt(dayDate, streak.reminderTime, settings.followUpDelayMinutes),
+            now,
+            settings,
+            { allowQuietShift: true, preserveDate: true }
+          );
+          if (followUp) {
+            events.push({
+              key: `followup:${streakId}:${followUp.dayStr}`,
+              type: "followup",
+              streakId,
+              dayStr: followUp.dayStr,
+              time: followUp.time,
+            });
           }
-          target = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate(), hour, minute, 0, 0);
         }
 
-        if (target <= now || logs.includes(formatLocalDate(target))) {
-          target.setDate(target.getDate() + 1);
-          target.setHours(hour, minute, 0, 0);
+        if (settings.lastChanceEnabled && parseTimeParts(settings.lastChanceTime)) {
+          const lastChance = findNextStreakEventTime(
+            streak,
+            (dayDate) => getDateAtTime(dayDate, settings.lastChanceTime),
+            now,
+            settings,
+            { allowQuietShift: false, preserveDate: true }
+          );
+          if (lastChance) {
+            events.push({
+              key: `lastchance:${streakId}:${lastChance.dayStr}`,
+              type: "lastchance",
+              streakId,
+              dayStr: lastChance.dayStr,
+              time: lastChance.time,
+            });
+          }
         }
 
-        if (endDateStr && formatLocalDate(target) > endDateStr) {
-          return null;
+        const currentStreakDays = Math.max(0, Number(streak.currentStreak || 0));
+        if (
+          settings.riskAlertEnabled
+          && currentStreakDays >= settings.riskThresholdDays
+          && parseTimeParts(settings.lastChanceTime)
+        ) {
+          const riskEvent = findNextStreakEventTime(
+            streak,
+            (dayDate) => getRiskAlertDateAt(dayDate, settings.lastChanceTime, settings.riskLeadMinutes),
+            now,
+            settings,
+            { allowQuietShift: false, preserveDate: true }
+          );
+          if (riskEvent) {
+            events.push({
+              key: `risk:${streakId}:${riskEvent.dayStr}`,
+              type: "risk",
+              streakId,
+              dayStr: riskEvent.dayStr,
+              time: riskEvent.time,
+            });
+          }
         }
 
-        return target;
+        return events;
       }
 
-      function triggerReminderForStreak(streakId) {
-        const latest = streaks.find((s) => getStreakId(s) === String(streakId));
+      function buildWeeklyPlanningEvent(now, settings) {
+        if (!settings.weeklyPlanningEnabled || !parseTimeParts(settings.weeklyPlanningTime)) {
+          return null;
+        }
+
+        const todayStr = getTodayDateString();
+        const todayDate = parseDateFromYmd(todayStr)
+          || new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+        for (let offset = 0; offset <= 14; offset += 1) {
+          const dayDate = new Date(todayDate);
+          dayDate.setDate(todayDate.getDate() + offset);
+          if (dayDate.getDay() !== 0) {
+            continue;
+          }
+
+          const rawTarget = getDateAtTime(dayDate, settings.weeklyPlanningTime);
+          if (!rawTarget) {
+            continue;
+          }
+
+          const target = applyReminderRuntimeGates(rawTarget, settings, {
+            allowQuietShift: true,
+            preserveDate: false,
+          });
+          if (!target || target.getTime() <= now.getTime()) {
+            continue;
+          }
+
+          const sourceDay = formatLocalDate(dayDate);
+          return {
+            key: `weekly:${sourceDay}`,
+            type: "weekly",
+            dayStr: sourceDay,
+            time: target,
+          };
+        }
+
+        return null;
+      }
+
+      function triggerScheduledReminderEvent(event) {
+        if (!event || !isAppReminderEnabled()) {
+          return;
+        }
+
+        const eventKey = String(event.key || "").trim();
+        if (eventKey && wasReminderEventRecentlySent(eventKey)) {
+          return;
+        }
+
+        const settings = getReminderSettings();
+        if (event.type === "weekly") {
+          if (!settings.weeklyPlanningEnabled) {
+            return;
+          }
+
+          const active = getActiveStreaks();
+          const count = active.length;
+          const preview = active
+            .slice(0, 3)
+            .map((streak) => String(streak.name || "Untitled").trim())
+            .filter((name) => Boolean(name))
+            .join(", ");
+          const body = count > 0
+            ? `Plan next week for ${count} active streak${count === 1 ? "" : "s"}${preview ? `: ${preview}${count > 3 ? "..." : ""}` : "."}`
+            : "Plan your next week habits and add a new streak.";
+
+          notifyReminder("Weekly Planning", body, [90, 70, 90]);
+          if (eventKey) {
+            markReminderEventSent(eventKey);
+          }
+          return;
+        }
+
+        const latest = streaks.find((s) => getStreakId(s) === String(event.streakId));
         if (!latest || isArchivedStreak(latest) || isCompletedStreak(latest) || !latest.reminderEnabled || !latest.reminderTime) {
           return;
         }
 
-        const today = getTodayDateString();
-        const logs = getNormalizedLogArray(latest);
-        if (logs.includes(today)) {
+        const dayStr = String(event.dayStr || getTodayDateString()).trim();
+        if (!dayStr || !isStreakDateInPlan(latest, dayStr)) {
           return;
         }
 
-        const body = `It's time to complete: ${latest.name} (${latest.reminderTime})`;
-        if ("Notification" in window && Notification.permission === "granted") {
-          try {
-            new Notification("Streak Reminder", { body });
-          } catch {
-            setGlobalStatus(body, "success");
-          }
-        } else {
-          setGlobalStatus(body, "success");
+        if (getNormalizedLogSet(latest).has(dayStr)) {
+          return;
         }
 
-        if (navigator.vibrate) {
-          navigator.vibrate([120, 80, 120]);
+        const streakName = String(latest.name || "Untitled streak").trim();
+        const currentStreakDays = Math.max(0, Number(latest.currentStreak || 0));
+
+        let title = "Streak Reminder";
+        let body = `${streakName} is pending today.`;
+        let vibratePattern = [110, 70, 110];
+
+        if (event.type === "followup") {
+          if (!settings.followUpEnabled) {
+            return;
+          }
+          title = "Follow-up Nudge";
+          body = `${streakName} is still pending. Complete it now.`;
+          vibratePattern = [90, 70, 90];
+        } else if (event.type === "lastchance") {
+          if (!settings.lastChanceEnabled) {
+            return;
+          }
+          title = "Last Chance";
+          body = `Last chance for ${streakName} before ${settings.lastChanceTime}.`;
+          vibratePattern = [150, 80, 150];
+        } else if (event.type === "risk") {
+          if (!settings.riskAlertEnabled || currentStreakDays < settings.riskThresholdDays) {
+            return;
+          }
+          title = "Streak Risk Alert";
+          body = `${streakName} has a ${currentStreakDays}-day streak at risk.`;
+          vibratePattern = [180, 80, 180, 80, 180];
+        } else if (event.type === "primary") {
+          title = "Streak Reminder";
+          body = `Time for ${streakName}. Mark today's completion.`;
+        }
+
+        notifyReminder(title, body, vibratePattern);
+        if (eventKey) {
+          markReminderEventSent(eventKey);
         }
       }
 
       function scheduleAllReminders() {
         clearAllReminderTimers();
-        streaks.forEach((streak) => {
-          const streakId = getStreakId(streak);
-          if (!streakId) {
+        if (!isAppReminderEnabled()) {
+          return;
+        }
+
+        const settings = getReminderSettings();
+        if (settings.quietHoursEnabled && isAlwaysQuiet(settings)) {
+          return;
+        }
+
+        const now = new Date();
+        const events = [];
+
+        getActiveStreaks().forEach((streak) => {
+          if (!streak.reminderEnabled || !streak.reminderTime) {
             return;
           }
-          const target = getReminderTarget(streak);
-          if (!target) {
-            return;
-          }
-
-          const targetTime = target.getTime();
-          const delay = Math.max(1000, targetTime - Date.now());
-          const safeDelay = Math.min(delay, 2147483647);
-
-          const timeoutId = setTimeout(() => {
-            if (Date.now() + 1000 < targetTime) {
-              scheduleAllReminders();
-              return;
-            }
-            triggerReminderForStreak(streakId);
-            scheduleAllReminders();
-          }, safeDelay);
-
-          reminderTimers.set(streakId, timeoutId);
+          events.push(...buildStreakReminderEvents(streak, now, settings));
         });
+
+        const weekly = buildWeeklyPlanningEvent(now, settings);
+        if (weekly) {
+          events.push(weekly);
+        }
+
+        events
+          .sort((a, b) => a.time.getTime() - b.time.getTime())
+          .forEach((event) => {
+            const targetTime = event.time.getTime();
+            const delay = Math.max(1000, targetTime - Date.now());
+            const safeDelay = Math.min(delay, 2147483647);
+            const timeoutId = setTimeout(() => {
+              if (Date.now() + 1000 < targetTime) {
+                scheduleAllReminders();
+                return;
+              }
+              triggerScheduledReminderEvent(event);
+              scheduleAllReminders();
+            }, safeDelay);
+            reminderTimers.set(event.key, timeoutId);
+          });
       }
 
       async function ensureAuth() {
@@ -6417,6 +7360,11 @@
 
       streakForm.addEventListener("submit", createStreak);
       reminderEnabledInput.addEventListener("change", updateReminderTimeField);
+      [followupToggle, lastChanceToggle, riskAlertToggle, weeklyPlanningToggle, quietHoursToggle]
+        .filter((el) => Boolean(el))
+        .forEach((el) => {
+          el.addEventListener("change", updateReminderControlFieldState);
+        });
       if (reportStreakFilter) {
         reportStreakFilter.addEventListener("change", () => {
           reportSelectedStreakId = String(reportStreakFilter.value || "").trim() || null;
@@ -6442,6 +7390,43 @@
         scheduleAllReminders();
         setProfileStatus(enabled ? "In-app reminders enabled." : "In-app reminders disabled.", "success");
       });
+
+      if (saveReminderSettingsBtn) {
+        saveReminderSettingsBtn.addEventListener("click", async () => {
+          try {
+            await saveReminderSettingsFromUI();
+          } catch (error) {
+            setProfileStatus(error.message || "Could not save reminder settings.", "error");
+          }
+        });
+      }
+
+      if (snoozeReminderBtn) {
+        snoozeReminderBtn.addEventListener("click", async () => {
+          try {
+            const saved = await saveReminderSettingsFromUI();
+            if (snoozeMinutesInput) {
+              snoozeMinutesInput.value = String(saved.snoozeMinutes);
+            }
+            await applyReminderSnoozeFromInput();
+          } catch (error) {
+            setProfileStatus(error.message || "Could not snooze reminders.", "error");
+          }
+        });
+      }
+
+      if (clearSnoozeBtn) {
+        clearSnoozeBtn.addEventListener("click", async () => {
+          clearReminderSnooze();
+          try {
+            await apiRequest(REMINDER_SNOOZE_API, { method: "DELETE" });
+            setReminderControlStatus("Snooze cleared.");
+          } catch {
+            setReminderControlStatus("Snooze cleared locally.");
+          }
+          scheduleAllReminders();
+        });
+      }
 
       allowNotificationBtn.addEventListener("click", async () => {
         if (!("Notification" in window)) {
@@ -6471,9 +7456,11 @@
         reminderEnabledInput.checked = false;
         appReminderToggle.checked = isAppReminderEnabled();
         updateReminderTimeField();
+        renderReminderControls();
 
         try {
           await ensureAuth();
+          await syncReminderSettingsFromServer();
           await fetchStreaks();
           setActiveTab("dashboard");
         } catch (error) {

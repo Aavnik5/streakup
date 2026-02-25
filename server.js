@@ -26,6 +26,33 @@ const RESET_PASSWORD_TOKEN_TTL_MINUTES = Number(
   process.env.RESET_PASSWORD_TOKEN_TTL_MINUTES || 30
 );
 const HABIT_NAME_MAX_LENGTH = Number(process.env.HABIT_NAME_MAX_LENGTH || 48);
+const REMINDER_ENGINE_ENABLED = String(
+  process.env.REMINDER_ENGINE_ENABLED || "1"
+).trim() !== "0";
+const REMINDER_TICK_SECONDS = Math.max(
+  15,
+  Number(process.env.REMINDER_TICK_SECONDS || 60)
+);
+const REMINDER_LOG_RETENTION_DAYS = Math.max(
+  7,
+  Number(process.env.REMINDER_LOG_RETENTION_DAYS || 90)
+);
+const REMINDER_DEFAULTS = Object.freeze({
+  followUpEnabled: true,
+  followUpDelayMinutes: 75,
+  lastChanceEnabled: true,
+  lastChanceTime: "22:30",
+  riskAlertEnabled: true,
+  riskThresholdDays: 5,
+  riskLeadMinutes: 45,
+  weeklyPlanningEnabled: true,
+  weeklyPlanningTime: "18:00",
+  quietHoursEnabled: false,
+  quietHoursStart: "23:00",
+  quietHoursEnd: "07:00",
+  snoozeMinutes: 30,
+  snoozeUntil: null,
+});
 
 const GMAIL_USER = process.env.GMAIL_USER || "";
 const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD || "";
@@ -35,9 +62,25 @@ const FRONTEND_RESET_URL =
   "http://127.0.0.1:5500/streak-frontend/reset-password.html";
 
 let mailTransporter = null;
+let reminderTicker = null;
+let reminderTickRunning = false;
+let reminderLastRunAt = null;
+let reminderLastError = "";
+let reminderSentCount = 0;
+let reminderFailedCount = 0;
+let reminderLastCleanupAt = 0;
 
 function isGmailAddress(email) {
   return /^[^\s@]+@gmail\.com$/i.test(String(email || "").trim());
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function getMailTransporter() {
@@ -121,6 +164,35 @@ async function sendPasswordResetEmail({ email, name, rawToken }) {
   });
 }
 
+async function sendReminderEmail({
+  email,
+  name,
+  subject,
+  title,
+  body,
+  meta = "",
+}) {
+  const transporter = getMailTransporter();
+  const safeName = escapeHtml(name);
+  const safeTitle = escapeHtml(title);
+  const safeBody = escapeHtml(body);
+  const safeMeta = escapeHtml(meta);
+
+  await transporter.sendMail({
+    from: MAIL_FROM,
+    to: email,
+    subject,
+    html: `
+      <div style="font-family: Arial, sans-serif; line-height: 1.5; color: #1d2a29;">
+        <h2 style="margin-bottom: 8px;">Hi ${safeName},</h2>
+        <p style="margin-top: 0; font-weight: 700; color: #0f8a73;">${safeTitle}</p>
+        <p style="margin: 0;">${safeBody}</p>
+        ${safeMeta ? `<p style="margin-top: 10px; font-size: 13px; color: #58706d;">${safeMeta}</p>` : ""}
+      </div>
+    `,
+  });
+}
+
 function formatLocalDate(date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -157,6 +229,232 @@ function parseYmdToDate(ymd) {
 
 function isValidTimeHHMM(value) {
   return /^([01]\d|2[0-3]):([0-5]\d)$/.test(String(value || "").trim());
+}
+
+function clampInteger(value, min, max, fallback) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  const rounded = Math.round(parsed);
+  if (rounded < min || rounded > max) {
+    return fallback;
+  }
+  return rounded;
+}
+
+function parseTimeParts(value) {
+  const raw = String(value || "").trim();
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(raw);
+  if (!match) {
+    return null;
+  }
+  return {
+    hour: Number(match[1]),
+    minute: Number(match[2]),
+  };
+}
+
+function getDateMinutes(date) {
+  return date.getHours() * 60 + date.getMinutes();
+}
+
+function buildDateAtTime(date, timeValue) {
+  const parts = parseTimeParts(timeValue);
+  if (!parts) {
+    return null;
+  }
+  return new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+    parts.hour,
+    parts.minute,
+    0,
+    0
+  );
+}
+
+function isAlwaysQuietHours(settings) {
+  const start = parseTimeParts(settings?.quietHoursStart);
+  const end = parseTimeParts(settings?.quietHoursEnd);
+  if (!start || !end) {
+    return false;
+  }
+  return start.hour === end.hour && start.minute === end.minute;
+}
+
+function isInsideQuietHours(date, settings) {
+  if (!settings?.quietHoursEnabled) {
+    return false;
+  }
+  const start = parseTimeParts(settings.quietHoursStart);
+  const end = parseTimeParts(settings.quietHoursEnd);
+  if (!start || !end) {
+    return false;
+  }
+  if (start.hour === end.hour && start.minute === end.minute) {
+    return true;
+  }
+
+  const current = getDateMinutes(date);
+  const startMinutes = start.hour * 60 + start.minute;
+  const endMinutes = end.hour * 60 + end.minute;
+  if (startMinutes < endMinutes) {
+    return current >= startMinutes && current < endMinutes;
+  }
+  return current >= startMinutes || current < endMinutes;
+}
+
+function normalizeSnoozeUntil(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return null;
+  }
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return parsed.toISOString();
+}
+
+function sanitizeReminderSettings(input = {}, base = REMINDER_DEFAULTS) {
+  const source =
+    input && typeof input === "object" ? input : {};
+  const fallback =
+    base && typeof base === "object" ? base : REMINDER_DEFAULTS;
+
+  const followUpEnabled =
+    source.followUpEnabled !== undefined
+      ? Boolean(source.followUpEnabled)
+      : Boolean(fallback.followUpEnabled);
+  const followUpDelayMinutes = clampInteger(
+    source.followUpDelayMinutes,
+    5,
+    360,
+    clampInteger(
+      fallback.followUpDelayMinutes,
+      5,
+      360,
+      REMINDER_DEFAULTS.followUpDelayMinutes
+    )
+  );
+
+  const lastChanceEnabled =
+    source.lastChanceEnabled !== undefined
+      ? Boolean(source.lastChanceEnabled)
+      : Boolean(fallback.lastChanceEnabled);
+  const lastChanceTime = isValidTimeHHMM(source.lastChanceTime)
+    ? String(source.lastChanceTime).trim()
+    : (isValidTimeHHMM(fallback.lastChanceTime)
+      ? String(fallback.lastChanceTime).trim()
+      : REMINDER_DEFAULTS.lastChanceTime);
+
+  const riskAlertEnabled =
+    source.riskAlertEnabled !== undefined
+      ? Boolean(source.riskAlertEnabled)
+      : Boolean(fallback.riskAlertEnabled);
+  const riskThresholdDays = clampInteger(
+    source.riskThresholdDays,
+    1,
+    3650,
+    clampInteger(
+      fallback.riskThresholdDays,
+      1,
+      3650,
+      REMINDER_DEFAULTS.riskThresholdDays
+    )
+  );
+  const riskLeadMinutes = clampInteger(
+    source.riskLeadMinutes,
+    5,
+    360,
+    clampInteger(
+      fallback.riskLeadMinutes,
+      5,
+      360,
+      REMINDER_DEFAULTS.riskLeadMinutes
+    )
+  );
+
+  const weeklyPlanningEnabled =
+    source.weeklyPlanningEnabled !== undefined
+      ? Boolean(source.weeklyPlanningEnabled)
+      : Boolean(fallback.weeklyPlanningEnabled);
+  const weeklyPlanningTime = isValidTimeHHMM(source.weeklyPlanningTime)
+    ? String(source.weeklyPlanningTime).trim()
+    : (isValidTimeHHMM(fallback.weeklyPlanningTime)
+      ? String(fallback.weeklyPlanningTime).trim()
+      : REMINDER_DEFAULTS.weeklyPlanningTime);
+
+  const quietHoursEnabled =
+    source.quietHoursEnabled !== undefined
+      ? Boolean(source.quietHoursEnabled)
+      : Boolean(fallback.quietHoursEnabled);
+  const quietHoursStart = isValidTimeHHMM(source.quietHoursStart)
+    ? String(source.quietHoursStart).trim()
+    : (isValidTimeHHMM(fallback.quietHoursStart)
+      ? String(fallback.quietHoursStart).trim()
+      : REMINDER_DEFAULTS.quietHoursStart);
+  const quietHoursEnd = isValidTimeHHMM(source.quietHoursEnd)
+    ? String(source.quietHoursEnd).trim()
+    : (isValidTimeHHMM(fallback.quietHoursEnd)
+      ? String(fallback.quietHoursEnd).trim()
+      : REMINDER_DEFAULTS.quietHoursEnd);
+
+  const snoozeMinutes = clampInteger(
+    source.snoozeMinutes,
+    5,
+    720,
+    clampInteger(
+      fallback.snoozeMinutes,
+      5,
+      720,
+      REMINDER_DEFAULTS.snoozeMinutes
+    )
+  );
+
+  const snoozeUntil =
+    source.snoozeUntil !== undefined
+      ? normalizeSnoozeUntil(source.snoozeUntil)
+      : normalizeSnoozeUntil(fallback.snoozeUntil);
+
+  return {
+    followUpEnabled,
+    followUpDelayMinutes,
+    lastChanceEnabled,
+    lastChanceTime,
+    riskAlertEnabled,
+    riskThresholdDays,
+    riskLeadMinutes,
+    weeklyPlanningEnabled,
+    weeklyPlanningTime,
+    quietHoursEnabled,
+    quietHoursStart,
+    quietHoursEnd,
+    snoozeMinutes,
+    snoozeUntil,
+  };
+}
+
+function normalizeReminderSettingsRow(row) {
+  const base = {
+    followUpEnabled: Number(row?.followUpEnabled || 0) === 1,
+    followUpDelayMinutes: Number(row?.followUpDelayMinutes || 0),
+    lastChanceEnabled: Number(row?.lastChanceEnabled || 0) === 1,
+    lastChanceTime: String(row?.lastChanceTime || "").trim(),
+    riskAlertEnabled: Number(row?.riskAlertEnabled || 0) === 1,
+    riskThresholdDays: Number(row?.riskThresholdDays || 0),
+    riskLeadMinutes: Number(row?.riskLeadMinutes || 0),
+    weeklyPlanningEnabled: Number(row?.weeklyPlanningEnabled || 0) === 1,
+    weeklyPlanningTime: String(row?.weeklyPlanningTime || "").trim(),
+    quietHoursEnabled: Number(row?.quietHoursEnabled || 0) === 1,
+    quietHoursStart: String(row?.quietHoursStart || "").trim(),
+    quietHoursEnd: String(row?.quietHoursEnd || "").trim(),
+    snoozeMinutes: Number(row?.snoozeMinutes || 0),
+    snoozeUntil: row?.snoozeUntil || null,
+  };
+  return sanitizeReminderSettings(base, REMINDER_DEFAULTS);
 }
 
 function parseLogs(logsValue) {
@@ -241,6 +539,45 @@ function getHabitEndDate(habit) {
   const endDate = new Date(startDate);
   endDate.setDate(endDate.getDate() + targetDays - 1);
   return endDate;
+}
+
+function getNormalizedHabitLogs(habit) {
+  return Array.from(
+    new Set(
+      (Array.isArray(habit?.logs) ? habit.logs : [])
+        .map((day) => normalizeYmdInput(day))
+        .filter((day) => Boolean(parseYmdToDate(day)))
+    )
+  ).sort();
+}
+
+function getHabitDoneDaysInPlan(habit) {
+  const logs = getNormalizedHabitLogs(habit);
+  const startStr = formatLocalDate(getHabitStartDate(habit));
+  const endDate = getHabitEndDate(habit);
+  const endStr = endDate ? formatLocalDate(endDate) : "";
+  return logs.filter((day) => day >= startStr && (!endStr || day <= endStr)).length;
+}
+
+function isHabitCompleted(habit) {
+  const targetDays = Number(habit?.targetDays || 0);
+  if (!Number.isInteger(targetDays) || targetDays <= 0) {
+    return false;
+  }
+  return getHabitDoneDaysInPlan(habit) >= targetDays;
+}
+
+function isHabitDateInPlan(habit, dayStr) {
+  const startDate = formatLocalDate(getHabitStartDate(habit));
+  const endDate = getHabitEndDate(habit);
+  const endDateStr = endDate ? formatLocalDate(endDate) : "";
+  if (dayStr < startDate) {
+    return false;
+  }
+  if (endDateStr && dayStr > endDateStr) {
+    return false;
+  }
+  return true;
 }
 
 function hashPassword(password) {
@@ -496,6 +833,109 @@ async function ensureHabitsSchema() {
   `);
 }
 
+async function ensureReminderSchema() {
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS reminder_settings (
+      userId INTEGER PRIMARY KEY,
+      followUpEnabled INTEGER NOT NULL DEFAULT 1,
+      followUpDelayMinutes INTEGER NOT NULL DEFAULT 75,
+      lastChanceEnabled INTEGER NOT NULL DEFAULT 1,
+      lastChanceTime TEXT NOT NULL DEFAULT '22:30',
+      riskAlertEnabled INTEGER NOT NULL DEFAULT 1,
+      riskThresholdDays INTEGER NOT NULL DEFAULT 5,
+      riskLeadMinutes INTEGER NOT NULL DEFAULT 45,
+      weeklyPlanningEnabled INTEGER NOT NULL DEFAULT 1,
+      weeklyPlanningTime TEXT NOT NULL DEFAULT '18:00',
+      quietHoursEnabled INTEGER NOT NULL DEFAULT 0,
+      quietHoursStart TEXT NOT NULL DEFAULT '23:00',
+      quietHoursEnd TEXT NOT NULL DEFAULT '07:00',
+      snoozeMinutes INTEGER NOT NULL DEFAULT 30,
+      snoozeUntil TEXT,
+      createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  const settingsInfo = await db.execute("PRAGMA table_info(reminder_settings)");
+  const settingsColumns = new Set(settingsInfo.rows.map((column) => column.name));
+
+  if (!settingsColumns.has("followUpEnabled")) {
+    await db.execute("ALTER TABLE reminder_settings ADD COLUMN followUpEnabled INTEGER NOT NULL DEFAULT 1");
+  }
+  if (!settingsColumns.has("followUpDelayMinutes")) {
+    await db.execute("ALTER TABLE reminder_settings ADD COLUMN followUpDelayMinutes INTEGER NOT NULL DEFAULT 75");
+  }
+  if (!settingsColumns.has("lastChanceEnabled")) {
+    await db.execute("ALTER TABLE reminder_settings ADD COLUMN lastChanceEnabled INTEGER NOT NULL DEFAULT 1");
+  }
+  if (!settingsColumns.has("lastChanceTime")) {
+    await db.execute("ALTER TABLE reminder_settings ADD COLUMN lastChanceTime TEXT NOT NULL DEFAULT '22:30'");
+  }
+  if (!settingsColumns.has("riskAlertEnabled")) {
+    await db.execute("ALTER TABLE reminder_settings ADD COLUMN riskAlertEnabled INTEGER NOT NULL DEFAULT 1");
+  }
+  if (!settingsColumns.has("riskThresholdDays")) {
+    await db.execute("ALTER TABLE reminder_settings ADD COLUMN riskThresholdDays INTEGER NOT NULL DEFAULT 5");
+  }
+  if (!settingsColumns.has("riskLeadMinutes")) {
+    await db.execute("ALTER TABLE reminder_settings ADD COLUMN riskLeadMinutes INTEGER NOT NULL DEFAULT 45");
+  }
+  if (!settingsColumns.has("weeklyPlanningEnabled")) {
+    await db.execute("ALTER TABLE reminder_settings ADD COLUMN weeklyPlanningEnabled INTEGER NOT NULL DEFAULT 1");
+  }
+  if (!settingsColumns.has("weeklyPlanningTime")) {
+    await db.execute("ALTER TABLE reminder_settings ADD COLUMN weeklyPlanningTime TEXT NOT NULL DEFAULT '18:00'");
+  }
+  if (!settingsColumns.has("quietHoursEnabled")) {
+    await db.execute("ALTER TABLE reminder_settings ADD COLUMN quietHoursEnabled INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!settingsColumns.has("quietHoursStart")) {
+    await db.execute("ALTER TABLE reminder_settings ADD COLUMN quietHoursStart TEXT NOT NULL DEFAULT '23:00'");
+  }
+  if (!settingsColumns.has("quietHoursEnd")) {
+    await db.execute("ALTER TABLE reminder_settings ADD COLUMN quietHoursEnd TEXT NOT NULL DEFAULT '07:00'");
+  }
+  if (!settingsColumns.has("snoozeMinutes")) {
+    await db.execute("ALTER TABLE reminder_settings ADD COLUMN snoozeMinutes INTEGER NOT NULL DEFAULT 30");
+  }
+  if (!settingsColumns.has("snoozeUntil")) {
+    await db.execute("ALTER TABLE reminder_settings ADD COLUMN snoozeUntil TEXT");
+  }
+  if (!settingsColumns.has("createdAt")) {
+    await db.execute("ALTER TABLE reminder_settings ADD COLUMN createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP");
+  }
+  if (!settingsColumns.has("updatedAt")) {
+    await db.execute("ALTER TABLE reminder_settings ADD COLUMN updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP");
+  }
+
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS reminder_delivery_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      eventKey TEXT NOT NULL UNIQUE,
+      userId INTEGER NOT NULL,
+      habitId INTEGER,
+      eventType TEXT NOT NULL,
+      eventDate TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'processing',
+      subject TEXT,
+      body TEXT,
+      sentAt TEXT,
+      error TEXT,
+      createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await db.execute(
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_reminder_delivery_event_key ON reminder_delivery_log(eventKey)"
+  );
+  await db.execute(
+    "CREATE INDEX IF NOT EXISTS idx_reminder_delivery_user_date ON reminder_delivery_log(userId, eventDate)"
+  );
+  await db.execute(
+    "CREATE INDEX IF NOT EXISTS idx_reminder_delivery_created_at ON reminder_delivery_log(createdAt)"
+  );
+}
+
 async function initDB() {
   try {
     await ensureUsersSchema();
@@ -510,6 +950,7 @@ async function initDB() {
     `);
 
     await ensureHabitsSchema();
+    await ensureReminderSchema();
 
     if (!Number.isFinite(SESSION_TTL_DAYS) || SESSION_TTL_DAYS <= 0) {
       await db.execute({
@@ -595,6 +1036,569 @@ async function handleResendVerificationOtp(email) {
   });
 
   return { message: "OTP sent to your email." };
+}
+
+async function getReminderSettingsForUser(userId) {
+  const numericUserId = Number(userId);
+  if (!Number.isInteger(numericUserId) || numericUserId <= 0) {
+    return sanitizeReminderSettings(REMINDER_DEFAULTS);
+  }
+
+  const result = await db.execute({
+    sql: "SELECT * FROM reminder_settings WHERE userId = ? LIMIT 1",
+    args: [numericUserId],
+  });
+
+  if (!result.rows.length) {
+    return sanitizeReminderSettings(REMINDER_DEFAULTS);
+  }
+
+  return normalizeReminderSettingsRow(result.rows[0]);
+}
+
+async function getReminderSettingsForUsers(userIds) {
+  const uniqueIds = Array.from(
+    new Set(
+      (Array.isArray(userIds) ? userIds : [])
+        .map((value) => Number(value))
+        .filter((value) => Number.isInteger(value) && value > 0)
+    )
+  );
+
+  const settingsByUserId = new Map();
+  if (!uniqueIds.length) {
+    return settingsByUserId;
+  }
+
+  const placeholders = uniqueIds.map(() => "?").join(", ");
+  const result = await db.execute({
+    sql: `SELECT * FROM reminder_settings WHERE userId IN (${placeholders})`,
+    args: uniqueIds,
+  });
+
+  result.rows.forEach((row) => {
+    settingsByUserId.set(Number(row.userId), normalizeReminderSettingsRow(row));
+  });
+
+  uniqueIds.forEach((userId) => {
+    if (!settingsByUserId.has(userId)) {
+      settingsByUserId.set(userId, sanitizeReminderSettings(REMINDER_DEFAULTS));
+    }
+  });
+
+  return settingsByUserId;
+}
+
+async function saveReminderSettingsForUser(userId, patch = {}, options = {}) {
+  const numericUserId = Number(userId);
+  if (!Number.isInteger(numericUserId) || numericUserId <= 0) {
+    throw new Error("Invalid user id for reminder settings");
+  }
+
+  const replaceAll = Boolean(options.replaceAll);
+  const current = await getReminderSettingsForUser(numericUserId);
+  const base = replaceAll ? sanitizeReminderSettings(REMINDER_DEFAULTS) : current;
+  const merged = {
+    ...base,
+    ...(patch && typeof patch === "object" ? patch : {}),
+  };
+
+  if (patch && Object.prototype.hasOwnProperty.call(patch, "snoozeUntil")) {
+    merged.snoozeUntil = patch.snoozeUntil;
+  }
+
+  const next = sanitizeReminderSettings(merged, base);
+  const nowIso = new Date().toISOString();
+
+  await db.execute({
+    sql: `
+      INSERT INTO reminder_settings (
+        userId,
+        followUpEnabled,
+        followUpDelayMinutes,
+        lastChanceEnabled,
+        lastChanceTime,
+        riskAlertEnabled,
+        riskThresholdDays,
+        riskLeadMinutes,
+        weeklyPlanningEnabled,
+        weeklyPlanningTime,
+        quietHoursEnabled,
+        quietHoursStart,
+        quietHoursEnd,
+        snoozeMinutes,
+        snoozeUntil,
+        createdAt,
+        updatedAt
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(userId) DO UPDATE SET
+        followUpEnabled = excluded.followUpEnabled,
+        followUpDelayMinutes = excluded.followUpDelayMinutes,
+        lastChanceEnabled = excluded.lastChanceEnabled,
+        lastChanceTime = excluded.lastChanceTime,
+        riskAlertEnabled = excluded.riskAlertEnabled,
+        riskThresholdDays = excluded.riskThresholdDays,
+        riskLeadMinutes = excluded.riskLeadMinutes,
+        weeklyPlanningEnabled = excluded.weeklyPlanningEnabled,
+        weeklyPlanningTime = excluded.weeklyPlanningTime,
+        quietHoursEnabled = excluded.quietHoursEnabled,
+        quietHoursStart = excluded.quietHoursStart,
+        quietHoursEnd = excluded.quietHoursEnd,
+        snoozeMinutes = excluded.snoozeMinutes,
+        snoozeUntil = excluded.snoozeUntil,
+        updatedAt = excluded.updatedAt
+    `,
+    args: [
+      numericUserId,
+      next.followUpEnabled ? 1 : 0,
+      next.followUpDelayMinutes,
+      next.lastChanceEnabled ? 1 : 0,
+      next.lastChanceTime,
+      next.riskAlertEnabled ? 1 : 0,
+      next.riskThresholdDays,
+      next.riskLeadMinutes,
+      next.weeklyPlanningEnabled ? 1 : 0,
+      next.weeklyPlanningTime,
+      next.quietHoursEnabled ? 1 : 0,
+      next.quietHoursStart,
+      next.quietHoursEnd,
+      next.snoozeMinutes,
+      next.snoozeUntil || null,
+      nowIso,
+      nowIso,
+    ],
+  });
+
+  return next;
+}
+
+function isSnoozeActive(settings, now = new Date()) {
+  const snoozeUntil = normalizeSnoozeUntil(settings?.snoozeUntil || null);
+  if (!snoozeUntil) {
+    return false;
+  }
+  return new Date(snoozeUntil).getTime() > now.getTime();
+}
+
+function getFollowUpReminderDate(primaryAt, delayMinutes) {
+  const followUp = new Date(primaryAt);
+  followUp.setMinutes(followUp.getMinutes() + delayMinutes);
+  if (formatLocalDate(followUp) !== formatLocalDate(primaryAt)) {
+    return new Date(
+      primaryAt.getFullYear(),
+      primaryAt.getMonth(),
+      primaryAt.getDate(),
+      23,
+      55,
+      0,
+      0
+    );
+  }
+  return followUp;
+}
+
+function getRiskReminderDate(cutoffAt, leadMinutes) {
+  const riskAt = new Date(cutoffAt);
+  riskAt.setMinutes(riskAt.getMinutes() - leadMinutes);
+  if (formatLocalDate(riskAt) !== formatLocalDate(cutoffAt)) {
+    return new Date(
+      cutoffAt.getFullYear(),
+      cutoffAt.getMonth(),
+      cutoffAt.getDate(),
+      0,
+      5,
+      0,
+      0
+    );
+  }
+  return riskAt;
+}
+
+function buildDueHabitReminderEvent(habit, settings, now) {
+  if (!habit?.reminderEnabled || !isValidTimeHHMM(habit?.reminderTime)) {
+    return null;
+  }
+
+  const today = formatLocalDate(now);
+  if (!isHabitDateInPlan(habit, today)) {
+    return null;
+  }
+  if (isHabitCompleted(habit)) {
+    return null;
+  }
+
+  const logs = new Set(getNormalizedHabitLogs(habit));
+  if (logs.has(today)) {
+    return null;
+  }
+
+  const primaryAt = buildDateAtTime(now, habit.reminderTime);
+  if (!primaryAt) {
+    return null;
+  }
+
+  const streakName = String(habit.name || "your streak").trim() || "your streak";
+  const events = [
+    {
+      type: "primary",
+      at: primaryAt,
+      subject: `Streak Reminder: ${streakName}`,
+      title: "Primary Reminder",
+      body: `${streakName} is pending for today. Planned reminder time: ${habit.reminderTime}.`,
+      meta: "Mark it complete to keep the streak alive.",
+    },
+  ];
+
+  if (settings.followUpEnabled) {
+    events.push({
+      type: "followup",
+      at: getFollowUpReminderDate(primaryAt, settings.followUpDelayMinutes),
+      subject: `Follow-up Nudge: ${streakName}`,
+      title: "Follow-up Nudge",
+      body: `${streakName} is still pending. Please complete it now.`,
+      meta: "This nudge is sent only when today is still unmarked.",
+    });
+  }
+
+  const cutoffTime = isValidTimeHHMM(settings.lastChanceTime)
+    ? settings.lastChanceTime
+    : REMINDER_DEFAULTS.lastChanceTime;
+  const cutoffAt = buildDateAtTime(now, cutoffTime);
+
+  const currentStreak = Math.max(0, Number(habit.currentStreak || 0));
+  if (settings.riskAlertEnabled && cutoffAt && currentStreak >= settings.riskThresholdDays) {
+    events.push({
+      type: "risk",
+      at: getRiskReminderDate(cutoffAt, settings.riskLeadMinutes),
+      subject: `Streak Risk Alert: ${streakName}`,
+      title: "Streak Risk Alert",
+      body: `${streakName} has a ${currentStreak}-day running streak at risk today.`,
+      meta: `Risk threshold: ${settings.riskThresholdDays} days.`,
+    });
+  }
+
+  if (settings.lastChanceEnabled && cutoffAt) {
+    events.push({
+      type: "lastchance",
+      at: cutoffAt,
+      subject: `Last Chance: ${streakName}`,
+      title: "Last Chance Reminder",
+      body: `Last chance to complete ${streakName} before ${cutoffTime}.`,
+      meta: "If not completed today, the active streak can break.",
+    });
+  }
+
+  const dueEvents = events
+    .filter((event) => event.at && formatLocalDate(event.at) === today && now.getTime() >= event.at.getTime())
+    .sort((a, b) => a.at.getTime() - b.at.getTime());
+
+  if (!dueEvents.length) {
+    return null;
+  }
+
+  const event = dueEvents[dueEvents.length - 1];
+  return {
+    eventKey: `${event.type}:${habit.userId}:${habit.id}:${today}`,
+    userId: Number(habit.userId),
+    habitId: Number(habit.id),
+    eventType: event.type,
+    eventDate: today,
+    subject: event.subject,
+    title: event.title,
+    body: event.body,
+    meta: event.meta,
+  };
+}
+
+function buildWeeklyPlanningReminderEvent(userId, habits, settings, now) {
+  if (!settings.weeklyPlanningEnabled) {
+    return null;
+  }
+  if (now.getDay() !== 0) {
+    return null;
+  }
+
+  const weeklyAt = buildDateAtTime(now, settings.weeklyPlanningTime);
+  if (!weeklyAt || now.getTime() < weeklyAt.getTime()) {
+    return null;
+  }
+
+  const today = formatLocalDate(now);
+  const activeHabits = (Array.isArray(habits) ? habits : [])
+    .filter((habit) => !isHabitCompleted(habit));
+  const pendingCount = activeHabits.filter((habit) => {
+    if (!isHabitDateInPlan(habit, today)) {
+      return false;
+    }
+    return !new Set(getNormalizedHabitLogs(habit)).has(today);
+  }).length;
+  const topHabits = activeHabits
+    .slice(0, 3)
+    .map((habit) => String(habit?.name || "").trim())
+    .filter((name) => Boolean(name));
+
+  const title = "Weekly Planning Reminder";
+  const body = activeHabits.length
+    ? `You have ${activeHabits.length} active streak(s). Pending today: ${pendingCount}.`
+    : "You currently have no active streaks. Plan one habit for this week.";
+  const meta = topHabits.length
+    ? `Top streaks: ${topHabits.join(", ")}${activeHabits.length > 3 ? ", ..." : ""}`
+    : "Open dashboard and plan your week.";
+
+  return {
+    eventKey: `weekly:${userId}:${today}`,
+    userId: Number(userId),
+    habitId: null,
+    eventType: "weekly_planning",
+    eventDate: today,
+    subject: "Weekly Habit Planning",
+    title,
+    body,
+    meta,
+  };
+}
+
+async function claimReminderDeliveryEvent(event) {
+  const existing = await db.execute({
+    sql: `
+      SELECT status
+      FROM reminder_delivery_log
+      WHERE eventKey = ?
+      LIMIT 1
+    `,
+    args: [event.eventKey],
+  });
+
+  if (existing.rows.length > 0) {
+    const status = String(existing.rows[0].status || "").toLowerCase();
+    if (status === "failed") {
+      await db.execute({
+        sql: `
+          UPDATE reminder_delivery_log
+          SET status = 'processing', error = NULL, createdAt = ?
+          WHERE eventKey = ?
+        `,
+        args: [new Date().toISOString(), event.eventKey],
+      });
+      return true;
+    }
+    return false;
+  }
+
+  const result = await db.execute({
+    sql: `
+      INSERT INTO reminder_delivery_log (
+        eventKey,
+        userId,
+        habitId,
+        eventType,
+        eventDate,
+        status,
+        subject,
+        body,
+        createdAt
+      )
+      VALUES (?, ?, ?, ?, ?, 'processing', ?, ?, ?)
+      ON CONFLICT(eventKey) DO NOTHING
+      RETURNING id
+    `,
+    args: [
+      event.eventKey,
+      event.userId,
+      event.habitId,
+      event.eventType,
+      event.eventDate,
+      event.subject,
+      event.body,
+      new Date().toISOString(),
+    ],
+  });
+
+  return result.rows.length > 0;
+}
+
+async function markReminderDeliverySent(eventKey) {
+  await db.execute({
+    sql: `
+      UPDATE reminder_delivery_log
+      SET status = 'sent', sentAt = ?, error = NULL
+      WHERE eventKey = ?
+    `,
+    args: [new Date().toISOString(), eventKey],
+  });
+}
+
+async function markReminderDeliveryFailed(eventKey, errorMessage) {
+  await db.execute({
+    sql: `
+      UPDATE reminder_delivery_log
+      SET status = 'failed', error = ?, sentAt = NULL
+      WHERE eventKey = ?
+    `,
+    args: [String(errorMessage || "Unknown reminder delivery error"), eventKey],
+  });
+}
+
+async function dispatchReminderEvent(event, user) {
+  const claimed = await claimReminderDeliveryEvent(event);
+  if (!claimed) {
+    return false;
+  }
+
+  try {
+    await sendReminderEmail({
+      email: user.email,
+      name: user.name || "User",
+      subject: event.subject,
+      title: event.title,
+      body: event.body,
+      meta: event.meta || "",
+    });
+    await markReminderDeliverySent(event.eventKey);
+    reminderSentCount += 1;
+    return true;
+  } catch (error) {
+    reminderFailedCount += 1;
+    await markReminderDeliveryFailed(event.eventKey, error.message || "Email send failed");
+    return false;
+  }
+}
+
+async function cleanupReminderLogs(now = new Date()) {
+  const nowMs = now.getTime();
+  if (nowMs - reminderLastCleanupAt < 6 * 60 * 60 * 1000) {
+    return;
+  }
+
+  const cutoff = new Date(nowMs - REMINDER_LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  await db.execute({
+    sql: "DELETE FROM reminder_delivery_log WHERE datetime(createdAt) < datetime(?)",
+    args: [cutoff],
+  });
+
+  reminderLastCleanupAt = nowMs;
+}
+
+async function runReminderEngineTick() {
+  if (!REMINDER_ENGINE_ENABLED) {
+    return;
+  }
+  if (reminderTickRunning) {
+    return;
+  }
+
+  reminderTickRunning = true;
+  reminderLastRunAt = new Date().toISOString();
+
+  try {
+    const now = new Date();
+    const habitsResult = await db.execute({
+      sql: `
+        SELECT habits.*, users.name AS userName, users.email AS userEmail
+        FROM habits
+        INNER JOIN users ON users.id = habits.userId
+        WHERE users.isVerified = 1 AND habits.archived = 0
+        ORDER BY habits.userId ASC, habits.id DESC
+      `,
+    });
+
+    const usersMap = new Map();
+    habitsResult.rows.forEach((row) => {
+      const habit = normalizeHabit(row);
+      const userId = Number(habit.userId);
+      if (!Number.isInteger(userId) || userId <= 0) {
+        return;
+      }
+
+      if (!usersMap.has(userId)) {
+        usersMap.set(userId, {
+          user: {
+            id: userId,
+            name: String(row.userName || "User"),
+            email: String(row.userEmail || "").trim(),
+          },
+          habits: [],
+        });
+      }
+      usersMap.get(userId).habits.push(habit);
+    });
+
+    const settingsByUser = await getReminderSettingsForUsers(Array.from(usersMap.keys()));
+
+    for (const [userId, data] of usersMap.entries()) {
+      if (!data.user.email) {
+        continue;
+      }
+
+      let settings = settingsByUser.get(userId) || sanitizeReminderSettings(REMINDER_DEFAULTS);
+      if (settings.snoozeUntil && !isSnoozeActive(settings, now)) {
+        settings = await saveReminderSettingsForUser(userId, { snoozeUntil: null });
+      }
+
+      if (isSnoozeActive(settings, now)) {
+        continue;
+      }
+      if (
+        settings.quietHoursEnabled &&
+        (isAlwaysQuietHours(settings) || isInsideQuietHours(now, settings))
+      ) {
+        continue;
+      }
+
+      const weeklyEvent = buildWeeklyPlanningReminderEvent(
+        userId,
+        data.habits,
+        settings,
+        now
+      );
+      if (weeklyEvent) {
+        await dispatchReminderEvent(weeklyEvent, data.user);
+      }
+
+      for (const habit of data.habits) {
+        const dueEvent = buildDueHabitReminderEvent(habit, settings, now);
+        if (!dueEvent) {
+          continue;
+        }
+        await dispatchReminderEvent(dueEvent, data.user);
+      }
+    }
+
+    await cleanupReminderLogs(now);
+    reminderLastError = "";
+  } catch (error) {
+    reminderLastError = error.message || "Reminder engine tick failed";
+    console.error("Reminder engine tick failed:", error);
+  } finally {
+    reminderTickRunning = false;
+    reminderLastRunAt = new Date().toISOString();
+  }
+}
+
+function startReminderEngine() {
+  if (!REMINDER_ENGINE_ENABLED) {
+    console.log("Reminder engine disabled by REMINDER_ENGINE_ENABLED=0");
+    return;
+  }
+  if (reminderTicker) {
+    return;
+  }
+
+  const tickMs = REMINDER_TICK_SECONDS * 1000;
+  reminderTicker = setInterval(() => {
+    runReminderEngineTick().catch((error) => {
+      reminderLastError = error.message || "Reminder engine interval failure";
+      console.error("Reminder engine interval failure:", error);
+    });
+  }, tickMs);
+
+  runReminderEngineTick().catch((error) => {
+    reminderLastError = error.message || "Reminder engine startup tick failed";
+    console.error("Reminder engine startup tick failed:", error);
+  });
+
+  console.log(`Reminder engine started (tick every ${REMINDER_TICK_SECONDS} seconds)`);
 }
 
 app.post("/api/auth/register", async (req, res) => {
@@ -956,6 +1960,165 @@ app.post("/api/auth/logout", requireAuth, async (req, res) => {
   }
 });
 
+app.get("/api/reminders/settings", requireAuth, async (req, res) => {
+  try {
+    const settings = await getReminderSettingsForUser(req.auth.user.id);
+    return res.json({ settings });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.put("/api/reminders/settings", requireAuth, async (req, res) => {
+  try {
+    const payload = req.body && typeof req.body === "object" ? req.body : {};
+
+    if (
+      payload.followUpDelayMinutes !== undefined &&
+      (!Number.isInteger(Number(payload.followUpDelayMinutes)) ||
+        Number(payload.followUpDelayMinutes) < 5 ||
+        Number(payload.followUpDelayMinutes) > 360)
+    ) {
+      return res.status(400).json({ error: "followUpDelayMinutes must be between 5 and 360" });
+    }
+
+    if (
+      payload.lastChanceTime !== undefined &&
+      !isValidTimeHHMM(payload.lastChanceTime)
+    ) {
+      return res.status(400).json({ error: "lastChanceTime must be in HH:MM format" });
+    }
+
+    if (
+      payload.riskThresholdDays !== undefined &&
+      (!Number.isInteger(Number(payload.riskThresholdDays)) ||
+        Number(payload.riskThresholdDays) < 1 ||
+        Number(payload.riskThresholdDays) > 3650)
+    ) {
+      return res.status(400).json({ error: "riskThresholdDays must be between 1 and 3650" });
+    }
+
+    if (
+      payload.riskLeadMinutes !== undefined &&
+      (!Number.isInteger(Number(payload.riskLeadMinutes)) ||
+        Number(payload.riskLeadMinutes) < 5 ||
+        Number(payload.riskLeadMinutes) > 360)
+    ) {
+      return res.status(400).json({ error: "riskLeadMinutes must be between 5 and 360" });
+    }
+
+    if (
+      payload.weeklyPlanningTime !== undefined &&
+      !isValidTimeHHMM(payload.weeklyPlanningTime)
+    ) {
+      return res.status(400).json({ error: "weeklyPlanningTime must be in HH:MM format" });
+    }
+
+    if (
+      payload.quietHoursStart !== undefined &&
+      !isValidTimeHHMM(payload.quietHoursStart)
+    ) {
+      return res.status(400).json({ error: "quietHoursStart must be in HH:MM format" });
+    }
+
+    if (
+      payload.quietHoursEnd !== undefined &&
+      !isValidTimeHHMM(payload.quietHoursEnd)
+    ) {
+      return res.status(400).json({ error: "quietHoursEnd must be in HH:MM format" });
+    }
+
+    if (
+      payload.snoozeMinutes !== undefined &&
+      (!Number.isInteger(Number(payload.snoozeMinutes)) ||
+        Number(payload.snoozeMinutes) < 5 ||
+        Number(payload.snoozeMinutes) > 720)
+    ) {
+      return res.status(400).json({ error: "snoozeMinutes must be between 5 and 720" });
+    }
+
+    if (
+      payload.snoozeUntil !== undefined &&
+      payload.snoozeUntil !== null &&
+      payload.snoozeUntil !== "" &&
+      !normalizeSnoozeUntil(payload.snoozeUntil)
+    ) {
+      return res.status(400).json({ error: "snoozeUntil must be a valid ISO date or null" });
+    }
+
+    const settings = await saveReminderSettingsForUser(req.auth.user.id, payload);
+    return res.json({
+      message: "Reminder settings updated",
+      settings,
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/reminders/snooze", requireAuth, async (req, res) => {
+  try {
+    const current = await getReminderSettingsForUser(req.auth.user.id);
+    const requestedMinutes = req.body?.minutes;
+    const minutes =
+      requestedMinutes === undefined || requestedMinutes === null || String(requestedMinutes).trim() === ""
+        ? current.snoozeMinutes
+        : Number(requestedMinutes);
+
+    if (!Number.isInteger(minutes) || minutes < 5 || minutes > 720) {
+      return res.status(400).json({ error: "minutes must be an integer between 5 and 720" });
+    }
+
+    const snoozeUntil = new Date(Date.now() + minutes * 60 * 1000).toISOString();
+    const settings = await saveReminderSettingsForUser(req.auth.user.id, {
+      snoozeMinutes: minutes,
+      snoozeUntil,
+    });
+
+    return res.json({
+      message: "Reminders snoozed",
+      snoozeUntil,
+      settings,
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/api/reminders/snooze", requireAuth, async (req, res) => {
+  try {
+    const settings = await saveReminderSettingsForUser(req.auth.user.id, {
+      snoozeUntil: null,
+    });
+    return res.json({
+      message: "Snooze cleared",
+      settings,
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/reminders/trigger-now", requireAuth, async (req, res) => {
+  try {
+    await runReminderEngineTick();
+    return res.json({
+      message: "Reminder engine tick executed",
+      status: {
+        enabled: REMINDER_ENGINE_ENABLED,
+        tickSeconds: REMINDER_TICK_SECONDS,
+        running: reminderTickRunning,
+        lastRunAt: reminderLastRunAt,
+        lastError: reminderLastError || null,
+        sentCount: reminderSentCount,
+        failedCount: reminderFailedCount,
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 app.get("/api/habits", requireAuth, async (req, res) => {
   try {
     const result = await db.execute({
@@ -1249,7 +2412,19 @@ app.delete("/api/habits/:id", requireAuth, async (req, res) => {
 });
 
 app.get("/api/health", (req, res) => {
-  res.json({ ok: true, service: "streak-backend" });
+  res.json({
+    ok: true,
+    service: "streak-backend",
+    reminders: {
+      enabled: REMINDER_ENGINE_ENABLED,
+      tickSeconds: REMINDER_TICK_SECONDS,
+      running: reminderTickRunning,
+      lastRunAt: reminderLastRunAt,
+      lastError: reminderLastError || null,
+      sentCount: reminderSentCount,
+      failedCount: reminderFailedCount,
+    },
+  });
 });
 
 app.get("/", (req, res) => {
@@ -1257,6 +2432,7 @@ app.get("/", (req, res) => {
 });
 
 initDB().then(() => {
+  startReminderEngine();
   app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
   });
