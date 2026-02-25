@@ -1,4 +1,4 @@
-const CACHE_NAME = "streak-tracker-static-v2";
+const CACHE_NAME = "streak-tracker-static-v3";
 const STATIC_ASSETS = [
   "./",
   "./index.html",
@@ -50,6 +50,11 @@ self.addEventListener("fetch", (event) => {
 
   const requestUrl = new URL(request.url);
   if (requestUrl.origin !== self.location.origin) {
+    return;
+  }
+
+  // Never cache API responses; always hit network for fresh streak data.
+  if (requestUrl.pathname.startsWith("/api/")) {
     return;
   }
 

@@ -57,6 +57,7 @@ const REMINDER_DEFAULTS = Object.freeze({
 const GMAIL_USER = process.env.GMAIL_USER || "";
 const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD || "";
 const MAIL_FROM = process.env.MAIL_FROM || GMAIL_USER;
+const FRONTEND_APP_URL = String(process.env.FRONTEND_APP_URL || "").trim();
 const FRONTEND_RESET_URL =
   process.env.FRONTEND_RESET_URL ||
   "http://127.0.0.1:5500/streak-frontend/reset-password.html";
@@ -81,6 +82,66 @@ function escapeHtml(value) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+function toSafeMultilineHtml(value) {
+  return escapeHtml(value).replace(/\r?\n/g, "<br />");
+}
+
+function buildBrandedEmailHtml({
+  preheader = "",
+  title = "",
+  subtitle = "",
+  name = "",
+  contentHtml = "",
+  footer = "You are receiving this email from Streak Up.",
+}) {
+  const safePreheader = escapeHtml(preheader);
+  const safeTitle = escapeHtml(title);
+  const safeSubtitle = escapeHtml(subtitle);
+  const safeName = escapeHtml(name || "there");
+  const safeFooter = escapeHtml(footer);
+
+  return `
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>${safeTitle}</title>
+      </head>
+      <body style="margin:0;padding:0;background:#eef5f2;">
+        <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">${safePreheader}</div>
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#eef5f2;padding:20px 10px;">
+          <tr>
+            <td align="center">
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:620px;">
+                <tr>
+                  <td style="border-radius:20px 20px 0 0;background:linear-gradient(135deg,#0f9d7d 0%,#2089d5 75%);padding:24px 26px;color:#ffffff;">
+                    <p style="margin:0 0 8px 0;font-size:12px;letter-spacing:1.6px;font-weight:700;text-transform:uppercase;opacity:0.92;">Streak Up</p>
+                    <h1 style="margin:0;font-size:28px;line-height:1.2;font-weight:800;">${safeTitle}</h1>
+                    <p style="margin:10px 0 0 0;font-size:14px;line-height:1.5;opacity:0.95;">${safeSubtitle}</p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="border:1px solid #d5e5df;border-top:none;border-radius:0 0 20px 20px;background:#ffffff;padding:24px 26px;">
+                    <p style="margin:0 0 12px 0;font-size:15px;line-height:1.5;color:#16312e;">Hi ${safeName},</p>
+                    ${contentHtml}
+                    <p style="margin:18px 0 0 0;font-size:12px;line-height:1.5;color:#6c8280;">${safeFooter}</p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:12px 6px 0 6px;text-align:center;">
+                    <p style="margin:0;font-size:11px;line-height:1.5;color:#7f9491;">Built with consistency, one day at a time.</p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </body>
+    </html>
+  `;
 }
 
 function getMailTransporter() {
@@ -123,44 +184,72 @@ function createPasswordResetToken() {
 
 async function sendEmailVerificationOtp({ email, name, otp }) {
   const transporter = getMailTransporter();
+  const safeOtp = escapeHtml(otp);
+  const safeMinutes = escapeHtml(EMAIL_OTP_TTL_MINUTES);
+  const html = buildBrandedEmailHtml({
+    preheader: "Verify your Streak Up account with OTP",
+    title: "Email Verification OTP",
+    subtitle: "One quick step before your streak journey starts.",
+    name,
+    contentHtml: `
+      <p style="margin:0;font-size:14px;line-height:1.6;color:#35514d;">
+        Use this OTP to verify your account:
+      </p>
+      <div style="margin:14px 0 10px 0;padding:14px 12px;border-radius:14px;border:1px dashed #89bce6;background:#f3f9ff;text-align:center;">
+        <span style="font-size:32px;line-height:1;font-weight:800;letter-spacing:7px;color:#0f8a73;">${safeOtp}</span>
+      </div>
+      <p style="margin:0;font-size:13px;line-height:1.5;color:#5f7673;">
+        This OTP expires in ${safeMinutes} minutes.
+      </p>
+    `,
+    footer: "If you did not create this account, you can ignore this email.",
+  });
 
   await transporter.sendMail({
     from: MAIL_FROM,
     to: email,
-    subject: "Your Streak Tracker verification OTP",
-    html: `
-      <div style="font-family: Arial, sans-serif; line-height: 1.5; color: #1d2a29;">
-        <h2 style="margin-bottom: 8px;">Hi ${name},</h2>
-        <p style="margin-top: 0;">Use this OTP to verify your Streak Tracker account:</p>
-        <p style="font-size: 30px; font-weight: 700; letter-spacing: 4px; margin: 10px 0;">${otp}</p>
-        <p style="font-size: 13px; color: #58706d;">This OTP expires in ${EMAIL_OTP_TTL_MINUTES} minutes.</p>
-      </div>
-    `,
+    subject: "Your Streak Up verification OTP",
+    text: `Hi ${name},\nUse this OTP to verify your Streak Up account: ${otp}\nThis OTP expires in ${EMAIL_OTP_TTL_MINUTES} minutes.`,
+    html,
   });
 }
 
 async function sendPasswordResetEmail({ email, name, rawToken }) {
   const transporter = getMailTransporter();
   const resetLink = `${FRONTEND_RESET_URL}?token=${encodeURIComponent(rawToken)}`;
+  const safeResetLink = escapeHtml(resetLink);
+  const safeMinutes = escapeHtml(RESET_PASSWORD_TOKEN_TTL_MINUTES);
+  const html = buildBrandedEmailHtml({
+    preheader: "Reset your Streak Up password",
+    title: "Password Reset Request",
+    subtitle: "Secure your account and continue your streaks.",
+    name,
+    contentHtml: `
+      <p style="margin:0;font-size:14px;line-height:1.6;color:#35514d;">
+        We received a request to reset your password.
+      </p>
+      <div style="margin:16px 0 12px 0;">
+        <a href="${safeResetLink}" style="display:inline-block;padding:11px 18px;border-radius:11px;background:linear-gradient(135deg,#0f9d7d 0%,#2089d5 100%);color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;">
+          Reset Password
+        </a>
+      </div>
+      <p style="margin:0;font-size:13px;line-height:1.5;color:#5f7673;">
+        This link expires in ${safeMinutes} minutes.
+      </p>
+      <div style="margin:12px 0 0 0;padding:10px 12px;border-radius:10px;background:#f6f9fb;border:1px solid #dde7ea;">
+        <p style="margin:0 0 4px 0;font-size:12px;color:#667d7a;">If the button does not work, copy this URL:</p>
+        <p style="margin:0;font-size:12px;line-height:1.45;color:#35514d;word-break:break-all;">${safeResetLink}</p>
+      </div>
+    `,
+    footer: "If you did not request this, ignore this email and your password will remain unchanged.",
+  });
 
   await transporter.sendMail({
     from: MAIL_FROM,
     to: email,
-    subject: "Reset your Streak Tracker password",
-    html: `
-      <div style="font-family: Arial, sans-serif; line-height: 1.5; color: #1d2a29;">
-        <h2 style="margin-bottom: 8px;">Hi ${name},</h2>
-        <p style="margin-top: 0;">We received a request to reset your password.</p>
-        <p>
-          <a href="${resetLink}" style="display:inline-block;background:#0f8a73;color:#fff;padding:10px 16px;border-radius:8px;text-decoration:none;">
-            Reset Password
-          </a>
-        </p>
-        <p style="font-size: 13px; color: #58706d;">This link expires in ${RESET_PASSWORD_TOKEN_TTL_MINUTES} minutes.</p>
-        <p style="font-size: 13px; color: #58706d;">If button does not work, copy this URL:</p>
-        <p style="font-size: 13px; word-break: break-all; color: #58706d;">${resetLink}</p>
-      </div>
-    `,
+    subject: "Reset your Streak Up password",
+    text: `Hi ${name},\nReset your password using this link:\n${resetLink}\nThis link expires in ${RESET_PASSWORD_TOKEN_TTL_MINUTES} minutes.`,
+    html,
   });
 }
 
@@ -173,23 +262,38 @@ async function sendReminderEmail({
   meta = "",
 }) {
   const transporter = getMailTransporter();
+  const textName = String(name || "User");
   const safeName = escapeHtml(name);
   const safeTitle = escapeHtml(title);
-  const safeBody = escapeHtml(body);
-  const safeMeta = escapeHtml(meta);
+  const safeBody = toSafeMultilineHtml(body);
+  const safeMeta = toSafeMultilineHtml(meta);
+  const appLink = FRONTEND_APP_URL ? escapeHtml(FRONTEND_APP_URL) : "";
+  const html = buildBrandedEmailHtml({
+    preheader: `${title} - Streak Up`,
+    title,
+    subtitle: "Stay consistent and protect your streak momentum.",
+    name,
+    contentHtml: `
+      <p style="margin:0 0 10px 0;font-size:15px;line-height:1.6;color:#24423f;font-weight:700;">${safeTitle}</p>
+      <p style="margin:0;font-size:14px;line-height:1.65;color:#35514d;">${safeBody}</p>
+      ${safeMeta ? `<p style="margin:10px 0 0 0;font-size:13px;line-height:1.55;color:#5f7673;">${safeMeta}</p>` : ""}
+      ${appLink ? `
+        <div style="margin:14px 0 0 0;">
+          <a href="${appLink}" style="display:inline-block;padding:10px 16px;border-radius:10px;background:#f3fbf8;border:1px solid #b8ddd1;color:#0f8a73;text-decoration:none;font-size:13px;font-weight:700;">
+            Open Streak Up
+          </a>
+        </div>
+      ` : ""}
+    `,
+    footer: "This reminder was sent by your configured reminder settings.",
+  });
 
   await transporter.sendMail({
     from: MAIL_FROM,
     to: email,
     subject,
-    html: `
-      <div style="font-family: Arial, sans-serif; line-height: 1.5; color: #1d2a29;">
-        <h2 style="margin-bottom: 8px;">Hi ${safeName},</h2>
-        <p style="margin-top: 0; font-weight: 700; color: #0f8a73;">${safeTitle}</p>
-        <p style="margin: 0;">${safeBody}</p>
-        ${safeMeta ? `<p style="margin-top: 10px; font-size: 13px; color: #58706d;">${safeMeta}</p>` : ""}
-      </div>
-    `,
+    text: `Hi ${textName},\n${title}\n${body}${meta ? `\n${meta}` : ""}${FRONTEND_APP_URL ? `\n${FRONTEND_APP_URL}` : ""}`,
+    html,
   });
 }
 
