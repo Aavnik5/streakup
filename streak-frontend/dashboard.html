@@ -3214,6 +3214,7 @@
 
           <p id="notificationState" class="status" style="margin-top: 0.62rem;">Permission: unknown</p>
           <button id="allowNotificationBtn" class="btn btn-ghost" type="button" style="width: 100%;">Allow Notifications</button>
+          <button id="testNotificationBtn" class="btn btn-soft" type="button" style="width: 100%; margin-top: 0.55rem;">Send Test Notification</button>
           <button id="profileLogoutBtn" class="btn btn-main" type="button" style="width: 100%; margin-top: 0.55rem;">Logout</button>
           <p id="profileStatus" class="status" aria-live="polite"></p>
         </article>
@@ -3376,6 +3377,9 @@
       const APP_REMINDER_SETTINGS_KEY = "streak_app_reminder_settings_v2";
       const APP_REMINDER_SNOOZE_UNTIL_KEY = "streak_app_reminder_snooze_until";
       const REMINDER_EVENT_DEDUP_MS = 45000;
+      const APP_NOTIFICATION_ICON = "./assets/icons/icon-192.png";
+      const APP_NOTIFICATION_BADGE = "./assets/icons/favicon-32.png";
+      const APP_NOTIFICATION_IMAGE = "./assets/icons/icon-512.png";
       const DEFAULT_REMINDER_SETTINGS = Object.freeze({
         followUpEnabled: true,
         followUpDelayMinutes: 75,
@@ -3548,6 +3552,7 @@
       const reminderControlStatus = document.getElementById("reminderControlStatus");
       const notificationState = document.getElementById("notificationState");
       const allowNotificationBtn = document.getElementById("allowNotificationBtn");
+      const testNotificationBtn = document.getElementById("testNotificationBtn");
       const profileLogoutBtn = document.getElementById("profileLogoutBtn");
 
       let streaks = [];
@@ -5215,20 +5220,75 @@
         recentReminderEvents.set(eventKey, Date.now());
       }
 
-      function notifyReminder(title, body, vibratePattern = null) {
-        if ("Notification" in window && Notification.permission === "granted") {
-          try {
-            new Notification(title, { body });
-          } catch {
-            setGlobalStatus(`${title}: ${body}`, "success");
-          }
-        } else {
-          setGlobalStatus(`${title}: ${body}`, "success");
+      async function showRichNotification(title, body, options = {}) {
+        if (!("Notification" in window) || Notification.permission !== "granted") {
+          return false;
         }
 
-        if (vibratePattern && navigator.vibrate) {
-          navigator.vibrate(vibratePattern);
+        const config = options && typeof options === "object" ? options : {};
+        const resolvedTitle = String(title || "Streak Up").trim() || "Streak Up";
+        const resolvedBody = String(body || "").trim();
+        const resolvedTag = String(config.tag || "streak-reminder").trim() || "streak-reminder";
+        const resolvedUrl = String(config.url || "./dashboard.html").trim() || "./dashboard.html";
+
+        const notificationOptions = {
+          body: resolvedBody,
+          icon: APP_NOTIFICATION_ICON,
+          badge: APP_NOTIFICATION_BADGE,
+          image: APP_NOTIFICATION_IMAGE,
+          tag: resolvedTag,
+          renotify: true,
+          requireInteraction: Boolean(config.requireInteraction),
+          timestamp: Date.now(),
+          actions: [
+            { action: "open_dashboard", title: "Open App" },
+            { action: "view_streak", title: "View Streak" },
+          ],
+          data: {
+            url: resolvedUrl,
+            streakId: config.streakId ? String(config.streakId) : "",
+            dayStr: config.dayStr ? String(config.dayStr) : "",
+            eventType: config.eventType ? String(config.eventType) : "general",
+          },
+        };
+
+        if (Array.isArray(config.vibratePattern) && config.vibratePattern.length) {
+          notificationOptions.vibrate = config.vibratePattern;
         }
+
+        if ("serviceWorker" in navigator) {
+          try {
+            const registration = await navigator.serviceWorker.ready;
+            await registration.showNotification(resolvedTitle, notificationOptions);
+            return true;
+          } catch (error) {
+            console.warn("Service worker notification failed:", error);
+          }
+        }
+
+        try {
+          new Notification(resolvedTitle, notificationOptions);
+          return true;
+        } catch {
+          return false;
+        }
+      }
+
+      function notifyReminder(title, body, vibratePattern = null, options = {}) {
+        const mergedOptions = {
+          ...(options && typeof options === "object" ? options : {}),
+          vibratePattern: Array.isArray(vibratePattern) ? vibratePattern : undefined,
+        };
+
+        showRichNotification(title, body, mergedOptions)
+          .then((shown) => {
+            if (!shown) {
+              setGlobalStatus(`${title}: ${body}`, "success");
+            }
+          })
+          .catch(() => {
+            setGlobalStatus(`${title}: ${body}`, "success");
+          });
       }
 
       async function apiRequest(url, options = {}) {
@@ -6698,9 +6758,15 @@
         if (!("Notification" in window)) {
           notificationState.textContent = "Permission: Notification API not supported";
           allowNotificationBtn.disabled = true;
+          if (testNotificationBtn) {
+            testNotificationBtn.disabled = true;
+          }
         } else {
           notificationState.textContent = `Permission: ${Notification.permission}`;
           allowNotificationBtn.disabled = Notification.permission === "granted";
+          if (testNotificationBtn) {
+            testNotificationBtn.disabled = Notification.permission !== "granted";
+          }
         }
       }
 
@@ -6886,7 +6952,12 @@
             ? `Plan next week for ${count} active streak${count === 1 ? "" : "s"}${preview ? `: ${preview}${count > 3 ? "..." : ""}` : "."}`
             : "Plan your next week habits and add a new streak.";
 
-          notifyReminder("Weekly Planning", body, [90, 70, 90]);
+          notifyReminder("Weekly Planning", body, [90, 70, 90], {
+            tag: eventKey || `weekly:${event.dayStr || getTodayDateString()}`,
+            eventType: "weekly",
+            dayStr: event.dayStr || getTodayDateString(),
+            url: "./dashboard.html?tab=report",
+          });
           if (eventKey) {
             markReminderEventSent(eventKey);
           }
@@ -6940,7 +7011,14 @@
           body = `Time for ${streakName}. Mark today's completion.`;
         }
 
-        notifyReminder(title, body, vibratePattern);
+        notifyReminder(title, body, vibratePattern, {
+          tag: eventKey || `${event.type || "primary"}:${getStreakId(latest)}:${dayStr}`,
+          eventType: event.type || "primary",
+          streakId: getStreakId(latest),
+          dayStr,
+          requireInteraction: event.type === "lastchance" || event.type === "risk",
+          url: "./dashboard.html?tab=dashboard",
+        });
         if (eventKey) {
           markReminderEventSent(eventKey);
         }
@@ -7384,10 +7462,29 @@
         });
       });
 
-      appReminderToggle.addEventListener("change", () => {
+      appReminderToggle.addEventListener("change", async () => {
         const enabled = appReminderToggle.checked;
         setAppReminderEnabled(enabled);
         scheduleAllReminders();
+
+        if (enabled && "Notification" in window && Notification.permission === "default") {
+          try {
+            const permission = await Notification.requestPermission();
+            notificationState.textContent = `Permission: ${permission}`;
+            allowNotificationBtn.disabled = permission === "granted";
+            if (testNotificationBtn) {
+              testNotificationBtn.disabled = permission !== "granted";
+            }
+          } catch {
+            // Permission prompt failed; keep reminder toggle state unchanged.
+          }
+        }
+
+        if (enabled && (!("Notification" in window) || Notification.permission !== "granted")) {
+          setProfileStatus("Reminders are on, but notification permission is not granted.", "error");
+          return;
+        }
+
         setProfileStatus(enabled ? "In-app reminders enabled." : "In-app reminders disabled.", "success");
       });
 
@@ -7431,6 +7528,9 @@
       allowNotificationBtn.addEventListener("click", async () => {
         if (!("Notification" in window)) {
           setProfileStatus("Notification API is not supported.", "error");
+          if (testNotificationBtn) {
+            testNotificationBtn.disabled = true;
+          }
           return;
         }
 
@@ -7438,11 +7538,41 @@
           const permission = await Notification.requestPermission();
           notificationState.textContent = `Permission: ${permission}`;
           allowNotificationBtn.disabled = permission === "granted";
+          if (testNotificationBtn) {
+            testNotificationBtn.disabled = permission !== "granted";
+          }
           setProfileStatus(permission === "granted" ? "Notification permission granted." : "Notification permission not granted.", permission === "granted" ? "success" : "error");
         } catch {
           setProfileStatus("Could not request notification permission.", "error");
         }
       });
+
+      if (testNotificationBtn) {
+        testNotificationBtn.addEventListener("click", async () => {
+          if (!("Notification" in window)) {
+            setProfileStatus("Notification API is not supported.", "error");
+            return;
+          }
+          if (Notification.permission !== "granted") {
+            setProfileStatus("Allow notifications first, then retry test.", "error");
+            return;
+          }
+
+          const sent = await showRichNotification(
+            "Streak Up Reminder",
+            "Test alert: Android-style reminder notification is active.",
+            {
+              tag: "manual-test",
+              eventType: "manual-test",
+              requireInteraction: true,
+              vibratePattern: [110, 70, 110],
+              url: "./dashboard.html?tab=dashboard",
+            }
+          );
+
+          setProfileStatus(sent ? "Test notification sent." : "Could not send test notification.", sent ? "success" : "error");
+        });
+      }
 
       profileLogoutBtn.addEventListener("click", logout);
 

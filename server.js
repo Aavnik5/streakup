@@ -1,10 +1,17 @@
 const express = require("express");
 const cors = require("cors");
 const crypto = require("crypto");
+const dns = require("node:dns");
 const nodemailer = require("nodemailer");
 const path = require("path");
 const { createClient } = require("@libsql/client");
 require("dotenv").config();
+
+try {
+  dns.setDefaultResultOrder("ipv4first");
+} catch {
+  // Ignore on older Node runtimes where this API may not exist.
+}
 
 const app = express();
 app.use(cors());
@@ -57,6 +64,10 @@ const REMINDER_DEFAULTS = Object.freeze({
 const GMAIL_USER = process.env.GMAIL_USER || "";
 const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD || "";
 const MAIL_FROM = process.env.MAIL_FROM || GMAIL_USER;
+const SMTP_HOST = String(process.env.SMTP_HOST || "smtp.gmail.com").trim();
+const SMTP_PORT = Number(process.env.SMTP_PORT || 465);
+const SMTP_SECURE = String(process.env.SMTP_SECURE || "1").trim() !== "0";
+const SMTP_FAMILY = Number(process.env.SMTP_FAMILY || 4) === 6 ? 6 : 4;
 const FRONTEND_APP_URL = String(process.env.FRONTEND_APP_URL || "").trim();
 const FRONTEND_RESET_URL =
   process.env.FRONTEND_RESET_URL ||
@@ -70,6 +81,19 @@ let reminderLastError = "";
 let reminderSentCount = 0;
 let reminderFailedCount = 0;
 let reminderLastCleanupAt = 0;
+
+function isSmtpConnectivityError(error) {
+  const code = String(error?.code || "").trim().toUpperCase();
+  return (
+    code === "ENETUNREACH" ||
+    code === "EHOSTUNREACH" ||
+    code === "ETIMEDOUT" ||
+    code === "ECONNREFUSED" ||
+    code === "ECONNRESET" ||
+    code === "EAI_AGAIN" ||
+    code === "ESOCKET"
+  );
+}
 
 function isGmailAddress(email) {
   return /^[^\s@]+@gmail\.com$/i.test(String(email || "").trim());
@@ -151,7 +175,16 @@ function getMailTransporter() {
 
   if (!mailTransporter) {
     mailTransporter = nodemailer.createTransport({
-      service: "gmail",
+      host: SMTP_HOST,
+      port: SMTP_PORT,
+      secure: SMTP_SECURE,
+      family: SMTP_FAMILY,
+      connectionTimeout: 15000,
+      greetingTimeout: 10000,
+      socketTimeout: 20000,
+      tls: {
+        servername: SMTP_HOST,
+      },
       auth: {
         user: GMAIL_USER,
         pass: GMAIL_APP_PASSWORD,
@@ -205,13 +238,21 @@ async function sendEmailVerificationOtp({ email, name, otp }) {
     footer: "If you did not create this account, you can ignore this email.",
   });
 
-  await transporter.sendMail({
-    from: MAIL_FROM,
-    to: email,
-    subject: "Your Streak Up verification OTP",
-    text: `Hi ${name},\nUse this OTP to verify your Streak Up account: ${otp}\nThis OTP expires in ${EMAIL_OTP_TTL_MINUTES} minutes.`,
-    html,
-  });
+  try {
+    await transporter.sendMail({
+      from: MAIL_FROM,
+      to: email,
+      subject: "Your Streak Up verification OTP",
+      text: `Hi ${name},\nUse this OTP to verify your Streak Up account: ${otp}\nThis OTP expires in ${EMAIL_OTP_TTL_MINUTES} minutes.`,
+      html,
+    });
+  } catch (error) {
+    console.error("Failed to send verification OTP:", error);
+    if (isSmtpConnectivityError(error)) {
+      throw new Error("OTP email service is temporarily unavailable. Please try again in 1-2 minutes.");
+    }
+    throw error;
+  }
 }
 
 async function sendPasswordResetEmail({ email, name, rawToken }) {
@@ -244,13 +285,21 @@ async function sendPasswordResetEmail({ email, name, rawToken }) {
     footer: "If you did not request this, ignore this email and your password will remain unchanged.",
   });
 
-  await transporter.sendMail({
-    from: MAIL_FROM,
-    to: email,
-    subject: "Reset your Streak Up password",
-    text: `Hi ${name},\nReset your password using this link:\n${resetLink}\nThis link expires in ${RESET_PASSWORD_TOKEN_TTL_MINUTES} minutes.`,
-    html,
-  });
+  try {
+    await transporter.sendMail({
+      from: MAIL_FROM,
+      to: email,
+      subject: "Reset your Streak Up password",
+      text: `Hi ${name},\nReset your password using this link:\n${resetLink}\nThis link expires in ${RESET_PASSWORD_TOKEN_TTL_MINUTES} minutes.`,
+      html,
+    });
+  } catch (error) {
+    console.error("Failed to send password reset email:", error);
+    if (isSmtpConnectivityError(error)) {
+      throw new Error("Password reset email service is temporarily unavailable. Please try again in 1-2 minutes.");
+    }
+    throw error;
+  }
 }
 
 async function sendReminderEmail({

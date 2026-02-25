@@ -1,4 +1,4 @@
-const CACHE_NAME = "streak-tracker-static-v3";
+const CACHE_NAME = "streak-tracker-static-v4";
 const STATIC_ASSETS = [
   "./",
   "./index.html",
@@ -98,6 +98,41 @@ self.addEventListener("fetch", (event) => {
           statusText: "Offline",
           headers: { "Content-Type": "text/plain" },
         });
+      }
+    })()
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+
+  const targetPath = event.notification?.data?.url || "./dashboard.html";
+
+  event.waitUntil(
+    (async () => {
+      const targetUrl = new URL(targetPath, self.location.origin).href;
+      const clientsList = await self.clients.matchAll({
+        type: "window",
+        includeUncontrolled: true,
+      });
+
+      for (const client of clientsList) {
+        const clientUrl = new URL(client.url);
+        if (clientUrl.origin !== self.location.origin) {
+          continue;
+        }
+
+        if ("focus" in client) {
+          await client.focus();
+        }
+        if ("navigate" in client && client.url !== targetUrl) {
+          await client.navigate(targetUrl);
+        }
+        return;
+      }
+
+      if (self.clients.openWindow) {
+        await self.clients.openWindow(targetUrl);
       }
     })()
   );
