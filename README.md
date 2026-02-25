@@ -24,6 +24,16 @@ This backend now runs a server-side reminder engine (email-based), so reminders 
   - `GMAIL_USER`
   - `GMAIL_APP_PASSWORD`
   - `MAIL_FROM` (optional fallback to `GMAIL_USER`)
+  - SMTP tuning (optional):
+    - `SMTP_HOST` (default `smtp.gmail.com`)
+    - `SMTP_PORT` (default `465`)
+    - `SMTP_SECURE` (`1` default)
+    - `SMTP_FAMILY` (`4` default)
+  - Provider selection:
+    - `EMAIL_PROVIDER` (`auto` default, `smtp`, or `resend`)
+    - `RESEND_API_KEY` (required for `resend`, and for `auto` fallback on SMTP failure)
+    - `RESEND_FROM` (default `onboarding@resend.dev`)
+    - `RESEND_API_URL` (default `https://api.resend.com/emails`)
 
 ### Reminder APIs
 
@@ -42,4 +52,5 @@ Health check includes reminder engine status:
 ### Notes
 
 - Delivery is email-based in this version.
+- Render free plan blocks outbound SMTP ports, so use `EMAIL_PROVIDER=resend` for OTP/recovery/reminders.
 - On free hosting plans that sleep services, background reliability may still degrade while instance is asleep.

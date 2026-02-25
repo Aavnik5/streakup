@@ -68,6 +68,14 @@ const SMTP_HOST = String(process.env.SMTP_HOST || "smtp.gmail.com").trim();
 const SMTP_PORT = Number(process.env.SMTP_PORT || 465);
 const SMTP_SECURE = String(process.env.SMTP_SECURE || "1").trim() !== "0";
 const SMTP_FAMILY = Number(process.env.SMTP_FAMILY || 4) === 6 ? 6 : 4;
+const EMAIL_PROVIDER = String(process.env.EMAIL_PROVIDER || "auto")
+  .trim()
+  .toLowerCase();
+const RESEND_API_KEY = String(process.env.RESEND_API_KEY || "").trim();
+const RESEND_API_URL = String(
+  process.env.RESEND_API_URL || "https://api.resend.com/emails"
+).trim();
+const RESEND_FROM = String(process.env.RESEND_FROM || "onboarding@resend.dev").trim();
 const FRONTEND_APP_URL = String(process.env.FRONTEND_APP_URL || "").trim();
 const FRONTEND_RESET_URL =
   process.env.FRONTEND_RESET_URL ||
@@ -195,6 +203,97 @@ function getMailTransporter() {
   return mailTransporter;
 }
 
+function getResolvedEmailProvider() {
+  if (EMAIL_PROVIDER === "smtp" || EMAIL_PROVIDER === "resend") {
+    return EMAIL_PROVIDER;
+  }
+  return "auto";
+}
+
+function getResendFromAddress() {
+  const from = String(RESEND_FROM || MAIL_FROM || "onboarding@resend.dev").trim();
+  return from || "onboarding@resend.dev";
+}
+
+async function sendViaResend({ to, subject, text, html, from }) {
+  if (!RESEND_API_KEY) {
+    throw new Error(
+      "Resend is not configured. Set RESEND_API_KEY (and optional RESEND_FROM) in environment variables."
+    );
+  }
+  if (typeof fetch !== "function") {
+    throw new Error("Global fetch is not available in this Node runtime for Resend API.");
+  }
+
+  const toList = Array.isArray(to)
+    ? to.map((entry) => String(entry || "").trim()).filter((entry) => Boolean(entry))
+    : [String(to || "").trim()].filter((entry) => Boolean(entry));
+  if (!toList.length) {
+    throw new Error("Resend payload requires at least one recipient.");
+  }
+
+  const response = await fetch(RESEND_API_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${RESEND_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: String(from || getResendFromAddress()).trim(),
+      to: toList,
+      subject: String(subject || "").trim(),
+      text: String(text || ""),
+      html: String(html || ""),
+    }),
+  });
+
+  if (!response.ok) {
+    let responseText = "";
+    try {
+      responseText = await response.text();
+    } catch {
+      responseText = "";
+    }
+    const trimmedResponseText = String(responseText || "").trim();
+    const shortResponse = trimmedResponseText.slice(0, 220);
+    throw new Error(
+      `Resend API request failed (${response.status}).${shortResponse ? ` ${shortResponse}` : ""}`
+    );
+  }
+}
+
+async function sendEmailMessage(message) {
+  const provider = getResolvedEmailProvider();
+
+  if (provider === "resend") {
+    await sendViaResend(message);
+    return;
+  }
+
+  if (provider === "smtp") {
+    const transporter = getMailTransporter();
+    await transporter.sendMail(message);
+    return;
+  }
+
+  try {
+    const transporter = getMailTransporter();
+    await transporter.sendMail(message);
+  } catch (smtpError) {
+    if (isSmtpConnectivityError(smtpError)) {
+      if (RESEND_API_KEY) {
+        console.warn("SMTP connectivity failed; falling back to Resend API.");
+        await sendViaResend(message);
+        return;
+      }
+      throw new Error(
+        "SMTP connection failed. On Render free plan SMTP ports are blocked. Set RESEND_API_KEY for API-based email delivery."
+      );
+    }
+    throw smtpError;
+  }
+}
+
 function createEmailOtp() {
   const otp = String(Math.floor(Math.random() * 1_000_000)).padStart(6, "0");
   const otpHash = crypto.createHash("sha256").update(otp).digest("hex");
@@ -216,7 +315,6 @@ function createPasswordResetToken() {
 }
 
 async function sendEmailVerificationOtp({ email, name, otp }) {
-  const transporter = getMailTransporter();
   const safeOtp = escapeHtml(otp);
   const safeMinutes = escapeHtml(EMAIL_OTP_TTL_MINUTES);
   const html = buildBrandedEmailHtml({
@@ -239,7 +337,7 @@ async function sendEmailVerificationOtp({ email, name, otp }) {
   });
 
   try {
-    await transporter.sendMail({
+    await sendEmailMessage({
       from: MAIL_FROM,
       to: email,
       subject: "Your Streak Up verification OTP",
@@ -256,7 +354,6 @@ async function sendEmailVerificationOtp({ email, name, otp }) {
 }
 
 async function sendPasswordResetEmail({ email, name, rawToken }) {
-  const transporter = getMailTransporter();
   const resetLink = `${FRONTEND_RESET_URL}?token=${encodeURIComponent(rawToken)}`;
   const safeResetLink = escapeHtml(resetLink);
   const safeMinutes = escapeHtml(RESET_PASSWORD_TOKEN_TTL_MINUTES);
@@ -286,7 +383,7 @@ async function sendPasswordResetEmail({ email, name, rawToken }) {
   });
 
   try {
-    await transporter.sendMail({
+    await sendEmailMessage({
       from: MAIL_FROM,
       to: email,
       subject: "Reset your Streak Up password",
@@ -310,7 +407,6 @@ async function sendReminderEmail({
   body,
   meta = "",
 }) {
-  const transporter = getMailTransporter();
   const textName = String(name || "User");
   const safeName = escapeHtml(name);
   const safeTitle = escapeHtml(title);
@@ -337,7 +433,7 @@ async function sendReminderEmail({
     footer: "This reminder was sent by your configured reminder settings.",
   });
 
-  await transporter.sendMail({
+  await sendEmailMessage({
     from: MAIL_FROM,
     to: email,
     subject,
