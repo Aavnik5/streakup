@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <link rel="manifest" href="./manifest.json" />
+    <meta name="theme-color" content="#0f8a73" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="application-name" content="Streak Up" />
+    <meta name="apple-mobile-web-app-title" content="Streak Up" />
+    <meta name="description" content="Create your Streak Up account and start tracking your habits." />
+    <meta name="robots" content="noindex, nofollow" />
+    <link rel="icon" type="image/png" sizes="32x32" href="./assets/icons/favicon-32.png" />
+    <link rel="shortcut icon" href="./assets/icons/favicon-32.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="./assets/icons/apple-touch-icon.png" />
+    <title>Register - Streak Up</title>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Sora:wght@400;600;700&display=swap");
+
+      :root {
+        --bg-main: #f0f7f3;
+        --bg-alt: #fdf3e4;
+        --card: rgba(255, 255, 255, 0.92);
+        --text-main: #1d2a29;
+        --text-muted: #5f7774;
+        --accent: #0f8a73;
+        --accent-dark: #0a6a58;
+        --danger: #af3a2e;
+        --border: #d8e7e2;
+        --shadow: 0 18px 34px rgba(18, 58, 52, 0.13);
+      }
+
+      * { box-sizing: border-box; }
+
+      html,
+      body {
+        width: 100%;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100dvh;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        font-family: "Sora", sans-serif;
+        color: var(--text-main);
+        background:
+          radial-gradient(circle at 15% 5%, rgba(15, 138, 115, 0.22), transparent 29%),
+          radial-gradient(circle at 90% 95%, rgba(220, 158, 69, 0.25), transparent 30%),
+          linear-gradient(160deg, var(--bg-main) 0%, var(--bg-alt) 100%);
+        padding:
+          max(0.9rem, env(safe-area-inset-top))
+          max(0.9rem, env(safe-area-inset-right))
+          max(0.9rem, env(safe-area-inset-bottom))
+          max(0.9rem, env(safe-area-inset-left));
+        overflow-x: hidden;
+        -webkit-text-size-adjust: 100%;
+      }
+
+      .auth-card {
+        width: 100%;
+        max-width: 480px;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(6px);
+        padding: 1.3rem;
+      }
+
+      .brand {
+        margin: 0;
+        font-family: "DM Serif Display", serif;
+        font-size: clamp(1.9rem, 5vw, 2.6rem);
+        line-height: 1.1;
+      }
+
+      .subtitle {
+        margin: 0.35rem 0 0.4rem;
+        color: var(--text-muted);
+        font-size: 0.95rem;
+      }
+
+      .pill {
+        display: inline-block;
+        margin-bottom: 1rem;
+        padding: 0.2rem 0.58rem;
+        font-size: 0.78rem;
+        border-radius: 999px;
+        background: #ebf8f4;
+        color: #0a6a58;
+        border: 1px solid #cfe8df;
+      }
+
+      .field { margin-bottom: 0.8rem; }
+      .label {
+        display: block;
+        margin-bottom: 0.34rem;
+        font-size: 0.86rem;
+        color: var(--text-muted);
+      }
+
+      .input {
+        width: 100%;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 0.85rem 0.88rem;
+        font: inherit;
+        font-size: 16px;
+        color: var(--text-main);
+        background: #fff;
+      }
+
+      .input:focus {
+        outline: 2px solid rgba(15, 138, 115, 0.28);
+        border-color: var(--accent);
+      }
+
+      .submit-btn {
+        width: 100%;
+        border: none;
+        border-radius: 12px;
+        padding: 0.86rem;
+        min-height: 46px;
+        margin-top: 0.2rem;
+        font: inherit;
+        font-weight: 700;
+        color: #fff;
+        background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dark) 100%);
+        cursor: pointer;
+        touch-action: manipulation;
+      }
+
+      .status {
+        min-height: 1.2rem;
+        margin: 0.7rem 0 0;
+        font-size: 0.88rem;
+        color: var(--text-muted);
+      }
+
+      .status.error { color: var(--danger); }
+      .status.success { color: #0b6f5c; }
+
+      .link-row {
+        margin-top: 0.9rem;
+        font-size: 0.9rem;
+        color: var(--text-muted);
+        word-break: break-word;
+      }
+
+      .link-row a {
+        color: var(--accent-dark);
+        text-decoration: none;
+        font-weight: 600;
+      }
+
+      @media (max-width: 520px) {
+        .auth-card {
+          border-radius: 16px;
+          padding: 1rem;
+        }
+      }
+
+      @media (max-width: 390px) {
+        .brand {
+          font-size: clamp(1.65rem, 8vw, 2.1rem);
+        }
+
+        .subtitle {
+          font-size: 0.9rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="auth-card">
+      <h1 class="brand">Create Account</h1>
+      <p class="subtitle">Register with your Gmail. OTP verify ke baad hi login hoga.</p>
+      <span class="pill">Gmail Only</span>
+
+      <form id="registerForm" novalidate>
+        <div class="field">
+          <label class="label" for="name">Name</label>
+          <input id="name" class="input" type="text" required maxlength="60" autocomplete="name" />
+        </div>
+
+        <div class="field">
+          <label class="label" for="email">Gmail</label>
+          <input
+            id="email"
+            class="input"
+            type="email"
+            required
+            autocomplete="email"
+            placeholder="you@gmail.com"
+          />
+        </div>
+
+        <div class="field">
+          <label class="label" for="password">Password</label>
+          <input
+            id="password"
+            class="input"
+            type="password"
+            required
+            minlength="6"
+            autocomplete="new-password"
+          />
+        </div>
+
+        <div class="field">
+          <label class="label" for="confirmPassword">Confirm Password</label>
+          <input
+            id="confirmPassword"
+            class="input"
+            type="password"
+            required
+            minlength="6"
+            autocomplete="new-password"
+          />
+        </div>
+
+        <button class="submit-btn" type="submit">Register</button>
+        <p id="status" class="status" aria-live="polite"></p>
+      </form>
+
+      <p class="link-row">Already have an account? <a href="./login.html">Login</a></p>
+    </main>
+
+    <script>
+      const API_ORIGIN = (() => {
+        let override = "";
+        try {
+          override = String(
+            localStorage.getItem("streak_api_origin") || window.__STREAK_API_ORIGIN || ""
+          ).trim();
+        } catch {
+          override = String(window.__STREAK_API_ORIGIN || "").trim();
+        }
+
+        if (override) {
+          return override.replace(/\/+$/, "");
+        }
+
+        const host = window.location.hostname || "localhost";
+        const isLocalHost =
+          host === "localhost" ||
+          host === "127.0.0.1" ||
+          /^10\./.test(host) ||
+          /^192\.168\./.test(host) ||
+          /^172\.(1[6-9]|2\d|3[0-1])\./.test(host);
+        if (isLocalHost) {
+          return `http://${host}:5000`;
+        }
+        return window.location.origin;
+      })();
+      const REGISTER_API = `${API_ORIGIN}/api/auth/register`;
+      const registerForm = document.getElementById("registerForm");
+      const nameInput = document.getElementById("name");
+      const emailInput = document.getElementById("email");
+      const passwordInput = document.getElementById("password");
+      const confirmPasswordInput = document.getElementById("confirmPassword");
+      const status = document.getElementById("status");
+
+      function setStatus(message, type = "") {
+        status.textContent = message;
+        status.className = `status ${type}`.trim();
+      }
+
+      function isGmail(email) {
+        return /^[^\s@]+@gmail\.com$/i.test(email);
+      }
+
+      registerForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+
+        const name = nameInput.value.trim();
+        const email = emailInput.value.trim().toLowerCase();
+        const password = passwordInput.value;
+        const confirmPassword = confirmPasswordInput.value;
+
+        if (!name || !email || !password || !confirmPassword) {
+          setStatus("All fields are required.", "error");
+          return;
+        }
+
+        if (!isGmail(email)) {
+          setStatus("Please use a valid Gmail address.", "error");
+          return;
+        }
+
+        if (password.length < 6) {
+          setStatus("Password must be at least 6 characters.", "error");
+          return;
+        }
+
+        if (password !== confirmPassword) {
+          setStatus("Passwords do not match.", "error");
+          return;
+        }
+
+        try {
+          setStatus("Creating account and sending OTP...");
+
+          const response = await fetch(REGISTER_API, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name, email, password }),
+          });
+
+          const data = await response.json();
+          if (!response.ok) {
+            throw new Error(data.error || data.message || "Registration failed");
+          }
+
+          setStatus(
+            "Registration successful. OTP sent to your Gmail. Verify OTP first.",
+            "success"
+          );
+
+          setTimeout(() => {
+            window.location.href = `./verify-otp.html?email=${encodeURIComponent(email)}`;
+          }, 2200);
+        } catch (error) {
+          setStatus(error.message || "Registration failed", "error");
+        }
+      });
+    </script>
+    <script src="./pwa.js"></script>
+  </body>
+</html>
+
+

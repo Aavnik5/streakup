@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Streak Up favicon">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#18b180" />
+      <stop offset="100%" stop-color="#0f7fce" />
+    </linearGradient>
+    <linearGradient id="flame" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffbf78" />
+      <stop offset="100%" stop-color="#ff6c43" />
+    </linearGradient>
+  </defs>
+
+  <rect x="12" y="12" width="232" height="232" rx="52" fill="url(#bg)" />
+  <rect x="56" y="60" width="144" height="130" rx="24" fill="#ffffff" opacity="0.95" />
+  <rect x="76" y="43" width="16" height="28" rx="8" fill="#bfe5ff" />
+  <rect x="164" y="43" width="16" height="28" rx="8" fill="#bfe5ff" />
+
+  <path d="M92 117l14 14 24-29" fill="none" stroke="#1eab72" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" />
+  <path d="M136 117l14 14 24-29" fill="none" stroke="#1eab72" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" />
+
+  <path d="M40 182c0-29 23-49 45-49s45 20 45 49c0 24-20 40-45 40s-45-16-45-40z" fill="url(#flame)" />
+  <path d="M64 164c0-15 10-30 21-40 12 10 22 25 22 40 0 13-10 21-22 21s-21-8-21-21z" fill="#ffd89e" />
+
+  <circle cx="198" cy="72" r="18" fill="#15b788" />
+  <path d="M190 72l6 6 12-13" fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" />
+</svg>
