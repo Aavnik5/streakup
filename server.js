@@ -211,8 +211,16 @@ function getResolvedEmailProvider() {
 }
 
 function getResendFromAddress() {
-  const from = String(RESEND_FROM || MAIL_FROM || "onboarding@resend.dev").trim();
+  const from = String(RESEND_FROM || "onboarding@resend.dev").trim();
   return from || "onboarding@resend.dev";
+}
+
+function buildResendMessage(message = {}) {
+  const safeMessage = message && typeof message === "object" ? message : {};
+  return {
+    ...safeMessage,
+    from: getResendFromAddress(),
+  };
 }
 
 async function sendViaResend({ to, subject, text, html, from }) {
@@ -266,7 +274,7 @@ async function sendEmailMessage(message) {
   const provider = getResolvedEmailProvider();
 
   if (provider === "resend") {
-    await sendViaResend(message);
+    await sendViaResend(buildResendMessage(message));
     return;
   }
 
@@ -283,7 +291,7 @@ async function sendEmailMessage(message) {
     if (isSmtpConnectivityError(smtpError)) {
       if (RESEND_API_KEY) {
         console.warn("SMTP connectivity failed; falling back to Resend API.");
-        await sendViaResend(message);
+        await sendViaResend(buildResendMessage(message));
         return;
       }
       throw new Error(
