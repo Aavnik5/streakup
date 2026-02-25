@@ -20,6 +20,7 @@ This backend now runs a server-side reminder engine (email-based), so reminders 
 - `REMINDER_ENGINE_ENABLED` (`1` default, set `0` to disable)
 - `REMINDER_TICK_SECONDS` (`60` default, minimum `15`)
 - `REMINDER_LOG_RETENTION_DAYS` (`90` default, minimum `7`)
+- `EMAIL_VERIFICATION_REQUIRED` (`0` default, set `1` to enforce OTP verification before login)
 - Existing mail settings are required for delivery:
   - `GMAIL_USER`
   - `GMAIL_APP_PASSWORD`

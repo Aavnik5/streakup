@@ -29,6 +29,8 @@ const PORT = Number(process.env.PORT || 5000);
 const SESSION_TTL_DAYS = Number(process.env.SESSION_TTL_DAYS || 0);
 const NEVER_EXPIRES_ISO = "9999-12-31T23:59:59.999Z";
 const EMAIL_OTP_TTL_MINUTES = Number(process.env.EMAIL_OTP_TTL_MINUTES || 10);
+const EMAIL_VERIFICATION_REQUIRED =
+  String(process.env.EMAIL_VERIFICATION_REQUIRED || "0").trim() === "1";
 const RESET_PASSWORD_TOKEN_TTL_MINUTES = Number(
   process.env.RESET_PASSWORD_TOKEN_TTL_MINUTES || 30
 );
@@ -922,7 +924,7 @@ async function getUserByToken(token) {
     return null;
   }
 
-  if (Number(row.isVerified || 0) !== 1) {
+  if (EMAIL_VERIFICATION_REQUIRED && Number(row.isVerified || 0) !== 1) {
     await db.execute({
       sql: "DELETE FROM sessions WHERE token = ?",
       args: [token],
@@ -1271,6 +1273,10 @@ async function issuePasswordResetForUser({ userId, name, email }) {
 }
 
 async function handleResendVerificationOtp(email) {
+  if (!EMAIL_VERIFICATION_REQUIRED) {
+    return { message: "Email verification is currently disabled. Please login directly." };
+  }
+
   const result = await db.execute({
     sql: "SELECT id, name, email, isVerified FROM users WHERE email = ? LIMIT 1",
     args: [email],
@@ -1755,9 +1761,11 @@ async function runReminderEngineTick() {
         SELECT habits.*, users.name AS userName, users.email AS userEmail
         FROM habits
         INNER JOIN users ON users.id = habits.userId
-        WHERE users.isVerified = 1 AND habits.archived = 0
+        WHERE habits.archived = 0
+          AND (? = 0 OR users.isVerified = 1)
         ORDER BY habits.userId ASC, habits.id DESC
       `,
+      args: [EMAIL_VERIFICATION_REQUIRED ? 1 : 0],
     });
 
     const usersMap = new Map();
@@ -1882,6 +1890,8 @@ app.post("/api/auth/register", async (req, res) => {
     });
 
     const passwordHash = hashPassword(password);
+    const verificationRequired = EMAIL_VERIFICATION_REQUIRED;
+    const nowIso = new Date().toISOString();
 
     if (existingUserResult.rows.length > 0) {
       const existing = existingUserResult.rows[0];
@@ -1890,39 +1900,71 @@ app.post("/api/auth/register", async (req, res) => {
         return res.status(409).json({ error: "Email already in use" });
       }
 
+      if (verificationRequired) {
+        await db.execute({
+          sql: "UPDATE users SET name = ?, passwordHash = ? WHERE id = ?",
+          args: [name, passwordHash, existing.id],
+        });
+
+        await issueEmailOtpForUser({ userId: Number(existing.id), name, email });
+
+        return res.json({
+          message: "OTP sent to your email. Verify before login.",
+          email,
+          requiresOtp: true,
+        });
+      }
+
       await db.execute({
-        sql: "UPDATE users SET name = ?, passwordHash = ? WHERE id = ?",
-        args: [name, passwordHash, existing.id],
+        sql: `
+          UPDATE users
+          SET name = ?, passwordHash = ?, isVerified = 1, verifiedAt = ?, emailOtpHash = NULL, emailOtpExpiresAt = NULL
+          WHERE id = ?
+        `,
+        args: [name, passwordHash, nowIso, existing.id],
       });
 
-      await issueEmailOtpForUser({ userId: Number(existing.id), name, email });
-
       return res.json({
-        message: "OTP sent to your email. Verify before login.",
+        message: "Registration successful. You can login now.",
         email,
+        requiresOtp: false,
       });
     }
 
     const createdUserResult = await db.execute({
       sql: `
         INSERT INTO users (name, email, passwordHash, isVerified)
-        VALUES (?, ?, ?, 0)
+        VALUES (?, ?, ?, ?)
         RETURNING id, name, email, isVerified
       `,
-      args: [name, email, passwordHash],
+      args: [name, email, passwordHash, verificationRequired ? 0 : 1],
     });
 
     const user = normalizeUser(createdUserResult.rows[0]);
 
-    await issueEmailOtpForUser({
-      userId: user.id,
-      name: user.name,
-      email: user.email,
+    if (verificationRequired) {
+      await issueEmailOtpForUser({
+        userId: user.id,
+        name: user.name,
+        email: user.email,
+      });
+
+      return res.status(201).json({
+        message: "Registration successful. OTP sent to your email.",
+        email: user.email,
+        requiresOtp: true,
+      });
+    }
+
+    await db.execute({
+      sql: "UPDATE users SET verifiedAt = ?, emailOtpHash = NULL, emailOtpExpiresAt = NULL WHERE id = ?",
+      args: [nowIso, user.id],
     });
 
     return res.status(201).json({
-      message: "Registration successful. OTP sent to your email.",
+      message: "Registration successful. You can login now.",
       email: user.email,
+      requiresOtp: false,
     });
   } catch (err) {
     return res.status(500).json({ error: err.message });
@@ -1970,6 +2012,21 @@ app.post("/api/auth/resend-verification", async (req, res) => {
 
 app.post("/api/auth/verify-otp", async (req, res) => {
   try {
+    if (!EMAIL_VERIFICATION_REQUIRED) {
+      const email = String(req.body?.email || "").trim().toLowerCase();
+      if (email && isGmailAddress(email)) {
+        await db.execute({
+          sql: `
+            UPDATE users
+            SET isVerified = 1, verifiedAt = COALESCE(verifiedAt, ?), emailOtpHash = NULL, emailOtpExpiresAt = NULL
+            WHERE email = ?
+          `,
+          args: [new Date().toISOString(), email],
+        });
+      }
+      return res.json({ message: "Email verification is disabled. Please login directly." });
+    }
+
     const email = String(req.body?.email || "").trim().toLowerCase();
     const otp = String(req.body?.otp || "").trim();
 
@@ -2073,7 +2130,7 @@ app.post("/api/auth/forgot-password", async (req, res) => {
 
     const user = userResult.rows[0];
 
-    if (Number(user.isVerified || 0) === 1) {
+    if (!EMAIL_VERIFICATION_REQUIRED || Number(user.isVerified || 0) === 1) {
       await issuePasswordResetForUser({
         userId: Number(user.id),
         name: String(user.name || "User"),
@@ -2180,7 +2237,7 @@ app.post("/api/auth/login", async (req, res) => {
       return res.status(401).json({ error: "Invalid email or password" });
     }
 
-    if (Number(row.isVerified || 0) !== 1) {
+    if (EMAIL_VERIFICATION_REQUIRED && Number(row.isVerified || 0) !== 1) {
       return res.status(403).json({
         error: "Please verify your email with OTP before login",
         code: "EMAIL_NOT_VERIFIED",
