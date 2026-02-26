@@ -1,0 +1,13 @@
+name: Keep StreakUps Awake
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping StreakUps App
+        run: curl -s https://streakups.onrender.com > /dev/null
