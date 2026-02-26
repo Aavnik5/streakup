@@ -2996,6 +2996,8 @@
       </header>
 
       <p id="globalStatus" class="status" aria-live="polite"></p>
+      <button id="installAppQuickBtn" class="btn btn-soft" type="button" style="width: 100%; margin-top: 0.2rem;">Install App</button>
+      <p id="installQuickState" class="status" style="margin-top: 0.38rem;">Install: checking...</p>
 
       <section id="sectionDashboard" class="tab-section active">
         <div class="summary">
@@ -3557,6 +3559,8 @@
       const testNotificationBtn = document.getElementById("testNotificationBtn");
       const installAppBtn = document.getElementById("installAppBtn");
       const installState = document.getElementById("installState");
+      const installAppQuickBtn = document.getElementById("installAppQuickBtn");
+      const installQuickState = document.getElementById("installQuickState");
       const profileLogoutBtn = document.getElementById("profileLogoutBtn");
 
       let streaks = [];
@@ -3614,9 +3618,19 @@
 
       function setInstallStatus(message, type = "") {
         if (!installState) {
+          if (installQuickState) {
+            setStatus(installQuickState, message, type);
+          }
           return;
         }
         setStatus(installState, message, type);
+        if (installQuickState) {
+          setStatus(installQuickState, message, type);
+        }
+      }
+
+      function getInstallButtons() {
+        return [installAppBtn, installAppQuickBtn].filter((button) => Boolean(button));
       }
 
       function isRunningStandalone() {
@@ -3635,33 +3649,42 @@
       }
 
       function updateInstallUiState() {
-        if (!installAppBtn) {
+        const installButtons = getInstallButtons();
+        if (!installButtons.length) {
           return;
         }
 
         if (isRunningStandalone()) {
-          installAppBtn.disabled = true;
-          installAppBtn.textContent = "App Installed";
+          installButtons.forEach((button) => {
+            button.disabled = true;
+            button.textContent = "App Installed";
+          });
           setInstallStatus("Install: already installed on this device.", "success");
           return;
         }
 
         if (deferredInstallPromptEvent) {
-          installAppBtn.disabled = false;
-          installAppBtn.textContent = "Install App";
+          installButtons.forEach((button) => {
+            button.disabled = false;
+            button.textContent = "Install App";
+          });
           setInstallStatus("Install is ready. Tap Install App.", "success");
           return;
         }
 
         if (isIosDevice()) {
-          installAppBtn.disabled = false;
-          installAppBtn.textContent = "Install App";
+          installButtons.forEach((button) => {
+            button.disabled = false;
+            button.textContent = "Install App";
+          });
           setInstallStatus("iPhone/iPad: use Share > Add to Home Screen.", "");
           return;
         }
 
-        installAppBtn.disabled = true;
-        installAppBtn.textContent = "Install Not Ready";
+        installButtons.forEach((button) => {
+          button.disabled = true;
+          button.textContent = "Install Not Ready";
+        });
         setInstallStatus("Install prompt not ready yet. Use app for a while and retry.", "");
       }
 
@@ -7644,8 +7667,7 @@
         setInstallStatus("App installed successfully.", "success");
       });
 
-      if (installAppBtn) {
-        installAppBtn.addEventListener("click", async () => {
+      async function handleInstallRequest() {
           if (isRunningStandalone()) {
             updateInstallUiState();
             return;
@@ -7675,8 +7697,11 @@
           }
 
           setInstallStatus("Install prompt unavailable right now. Retry after using app for some time.", "error");
-        });
       }
+
+      getInstallButtons().forEach((button) => {
+        button.addEventListener("click", handleInstallRequest);
+      });
 
       profileLogoutBtn.addEventListener("click", logout);
 

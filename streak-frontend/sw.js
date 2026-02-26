@@ -1,4 +1,4 @@
-const CACHE_NAME = "streak-tracker-static-v6";
+const CACHE_NAME = "streak-tracker-static-v7";
 const STATIC_ASSETS = [
   "./",
   "./index.html",
