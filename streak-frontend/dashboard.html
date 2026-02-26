@@ -3215,6 +3215,8 @@
           <p id="notificationState" class="status" style="margin-top: 0.62rem;">Permission: unknown</p>
           <button id="allowNotificationBtn" class="btn btn-ghost" type="button" style="width: 100%;">Allow Notifications</button>
           <button id="testNotificationBtn" class="btn btn-soft" type="button" style="width: 100%; margin-top: 0.55rem;">Send Test Notification</button>
+          <button id="installAppBtn" class="btn btn-ghost" type="button" style="width: 100%; margin-top: 0.55rem;">Install App</button>
+          <p id="installState" class="status" style="margin-top: 0.46rem;">Install: checking...</p>
           <button id="profileLogoutBtn" class="btn btn-main" type="button" style="width: 100%; margin-top: 0.55rem;">Logout</button>
           <p id="profileStatus" class="status" aria-live="polite"></p>
         </article>
@@ -3553,6 +3555,8 @@
       const notificationState = document.getElementById("notificationState");
       const allowNotificationBtn = document.getElementById("allowNotificationBtn");
       const testNotificationBtn = document.getElementById("testNotificationBtn");
+      const installAppBtn = document.getElementById("installAppBtn");
+      const installState = document.getElementById("installState");
       const profileLogoutBtn = document.getElementById("profileLogoutBtn");
 
       let streaks = [];
@@ -3569,6 +3573,7 @@
       let shareImageDataUrl = "";
       let celebrationConfetti = null;
       let celebrationFadeTimer = null;
+      let deferredInstallPromptEvent = null;
 
       function getToken() {
         return localStorage.getItem("streak_token") || "";
@@ -3605,6 +3610,59 @@
           return;
         }
         setStatus(reminderControlStatus, message, type);
+      }
+
+      function setInstallStatus(message, type = "") {
+        if (!installState) {
+          return;
+        }
+        setStatus(installState, message, type);
+      }
+
+      function isRunningStandalone() {
+        try {
+          return window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+        } catch {
+          return false;
+        }
+      }
+
+      function isIosDevice() {
+        const ua = String(window.navigator.userAgent || "").toLowerCase();
+        const classicIos = /iphone|ipad|ipod/.test(ua);
+        const ipadOsDesktopUa = window.navigator.platform === "MacIntel" && Number(window.navigator.maxTouchPoints || 0) > 1;
+        return classicIos || ipadOsDesktopUa;
+      }
+
+      function updateInstallUiState() {
+        if (!installAppBtn) {
+          return;
+        }
+
+        if (isRunningStandalone()) {
+          installAppBtn.disabled = true;
+          installAppBtn.textContent = "App Installed";
+          setInstallStatus("Install: already installed on this device.", "success");
+          return;
+        }
+
+        if (deferredInstallPromptEvent) {
+          installAppBtn.disabled = false;
+          installAppBtn.textContent = "Install App";
+          setInstallStatus("Install is ready. Tap Install App.", "success");
+          return;
+        }
+
+        if (isIosDevice()) {
+          installAppBtn.disabled = false;
+          installAppBtn.textContent = "Install App";
+          setInstallStatus("iPhone/iPad: use Share > Add to Home Screen.", "");
+          return;
+        }
+
+        installAppBtn.disabled = true;
+        installAppBtn.textContent = "Install Not Ready";
+        setInstallStatus("Install prompt not ready yet. Use app for a while and retry.", "");
       }
 
       function lockBodyScroll() {
@@ -7574,6 +7632,52 @@
         });
       }
 
+      window.addEventListener("beforeinstallprompt", (event) => {
+        event.preventDefault();
+        deferredInstallPromptEvent = event;
+        updateInstallUiState();
+      });
+
+      window.addEventListener("appinstalled", () => {
+        deferredInstallPromptEvent = null;
+        updateInstallUiState();
+        setInstallStatus("App installed successfully.", "success");
+      });
+
+      if (installAppBtn) {
+        installAppBtn.addEventListener("click", async () => {
+          if (isRunningStandalone()) {
+            updateInstallUiState();
+            return;
+          }
+
+          if (deferredInstallPromptEvent) {
+            try {
+              await deferredInstallPromptEvent.prompt();
+              const choice = await deferredInstallPromptEvent.userChoice;
+              if (choice?.outcome === "accepted") {
+                setInstallStatus("Install started. Check home screen/app list.", "success");
+              } else {
+                setInstallStatus("Install cancelled.", "error");
+              }
+            } catch {
+              setInstallStatus("Could not open install prompt.", "error");
+            } finally {
+              deferredInstallPromptEvent = null;
+              updateInstallUiState();
+            }
+            return;
+          }
+
+          if (isIosDevice()) {
+            setInstallStatus("Open Share icon in Safari and tap Add to Home Screen.", "success");
+            return;
+          }
+
+          setInstallStatus("Install prompt unavailable right now. Retry after using app for some time.", "error");
+        });
+      }
+
       profileLogoutBtn.addEventListener("click", logout);
 
       (async function boot() {
@@ -7585,6 +7689,7 @@
         startDateInput.value = getTodayDateString();
         reminderEnabledInput.checked = false;
         appReminderToggle.checked = isAppReminderEnabled();
+        updateInstallUiState();
         updateReminderTimeField();
         renderReminderControls();
 
