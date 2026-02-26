@@ -77,8 +77,10 @@ const RESEND_API_URL = String(
   process.env.RESEND_API_URL || "https://api.resend.com/emails"
 ).trim();
 const RESEND_FROM = String(process.env.RESEND_FROM || "onboarding@resend.dev").trim();
+const DEFAULT_GOOGLE_SCRIPT_WEBHOOK_URL =
+  "https://script.google.com/macros/s/AKfycbzMKm4wdFlshWl7UfRrjqj5Q3ex7I2YsvhZa9k2vGherhGZc0lrDbhLFrG6R2thWq_98w/exec";
 const GOOGLE_SCRIPT_WEBHOOK_URL = String(
-  process.env.GOOGLE_SCRIPT_WEBHOOK_URL || ""
+  process.env.GOOGLE_SCRIPT_WEBHOOK_URL || DEFAULT_GOOGLE_SCRIPT_WEBHOOK_URL
 ).trim();
 const FRONTEND_APP_URL = String(process.env.FRONTEND_APP_URL || "").trim();
 const FRONTEND_RESET_URL =
@@ -208,15 +210,16 @@ function getMailTransporter() {
 }
 
 function getResolvedEmailProvider() {
-  if (EMAIL_PROVIDER === "smtp" || EMAIL_PROVIDER === "resend") {
-    return EMAIL_PROVIDER;
-  }
   if (
     EMAIL_PROVIDER === "google_script" ||
+    EMAIL_PROVIDER === "google_webhook" ||
     EMAIL_PROVIDER === "apps_script" ||
     EMAIL_PROVIDER === "google_apps_script"
   ) {
     return "google_script";
+  }
+  if (EMAIL_PROVIDER === "smtp" || EMAIL_PROVIDER === "resend") {
+    return EMAIL_PROVIDER;
   }
   return "auto";
 }
@@ -358,6 +361,13 @@ async function sendEmailMessage(message) {
   const provider = getResolvedEmailProvider();
 
   if (provider === "resend") {
+    if (GOOGLE_SCRIPT_WEBHOOK_URL) {
+      console.warn(
+        "EMAIL_PROVIDER=resend ignored because GOOGLE_SCRIPT_WEBHOOK_URL is configured; using Google Apps Script webhook."
+      );
+      await sendViaGoogleScript(message);
+      return;
+    }
     await sendViaResend(buildResendMessage(message));
     return;
   }
@@ -373,23 +383,29 @@ async function sendEmailMessage(message) {
     return;
   }
 
+  // Auto mode: prefer webhook delivery on free hosts where SMTP/Resend may be restricted.
+  if (GOOGLE_SCRIPT_WEBHOOK_URL) {
+    await sendViaGoogleScript(message);
+    return;
+  }
+
   try {
     const transporter = getMailTransporter();
     await transporter.sendMail(message);
   } catch (smtpError) {
     if (isSmtpConnectivityError(smtpError)) {
-      if (RESEND_API_KEY) {
-        console.warn("SMTP connectivity failed; falling back to Resend API.");
-        await sendViaResend(buildResendMessage(message));
-        return;
-      }
       if (GOOGLE_SCRIPT_WEBHOOK_URL) {
         console.warn("SMTP connectivity failed; falling back to Google Apps Script webhook.");
         await sendViaGoogleScript(message);
         return;
       }
+      if (RESEND_API_KEY) {
+        console.warn("SMTP connectivity failed; falling back to Resend API.");
+        await sendViaResend(buildResendMessage(message));
+        return;
+      }
       throw new Error(
-        "SMTP connection failed. On Render free plan SMTP ports are blocked. Set RESEND_API_KEY or GOOGLE_SCRIPT_WEBHOOK_URL for API-based email delivery."
+        "SMTP connection failed. On Render free plan SMTP ports are blocked. Set GOOGLE_SCRIPT_WEBHOOK_URL or RESEND_API_KEY for API-based email delivery."
       );
     }
     throw smtpError;
