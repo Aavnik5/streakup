@@ -177,7 +177,7 @@
   <body>
     <main class="auth-card">
       <h1 class="brand">Create Account</h1>
-      <p class="subtitle">Register with your Gmail. OTP flow depends on server settings.</p>
+      <p class="subtitle">Register with your Gmail. OTP verification is required before login.</p>
       <span class="pill">Gmail Only</span>
 
       <form id="registerForm" novalidate>
@@ -315,24 +315,13 @@
             throw new Error(data.error || data.message || "Registration failed");
           }
 
-          const requiresOtp = data.requiresOtp !== false;
-          if (requiresOtp) {
-            setStatus(
-              "Registration successful. OTP sent to your Gmail. Verify OTP first.",
-              "success"
-            );
-            setTimeout(() => {
-              window.location.href = `./verify-otp.html?email=${encodeURIComponent(email)}`;
-            }, 2200);
-          } else {
-            setStatus(
-              "Registration successful. OTP is currently disabled. Please login.",
-              "success"
-            );
-            setTimeout(() => {
-              window.location.href = `./login.html`;
-            }, 1600);
-          }
+          setStatus(
+            data.message || "Registration successful. OTP sent to your Gmail. Verify OTP first.",
+            "success"
+          );
+          setTimeout(() => {
+            window.location.href = `./verify-otp.html?email=${encodeURIComponent(email)}`;
+          }, 2200);
         } catch (error) {
           setStatus(error.message || "Registration failed", "error");
         }
