@@ -30,7 +30,7 @@ const SESSION_TTL_DAYS = Number(process.env.SESSION_TTL_DAYS || 0);
 const NEVER_EXPIRES_ISO = "9999-12-31T23:59:59.999Z";
 const EMAIL_OTP_TTL_MINUTES = Number(process.env.EMAIL_OTP_TTL_MINUTES || 10);
 const EMAIL_VERIFICATION_REQUIRED =
-  String(process.env.EMAIL_VERIFICATION_REQUIRED || "0").trim() === "1";
+  String(process.env.EMAIL_VERIFICATION_REQUIRED || "1").trim() === "1";
 const RESET_PASSWORD_TOKEN_TTL_MINUTES = Number(
   process.env.RESET_PASSWORD_TOKEN_TTL_MINUTES || 30
 );
@@ -78,6 +78,9 @@ const RESEND_API_URL = String(
   process.env.RESEND_API_URL || "https://api.resend.com/emails"
 ).trim();
 const RESEND_FROM = String(process.env.RESEND_FROM || "onboarding@resend.dev").trim();
+const GOOGLE_SCRIPT_WEBHOOK_URL = String(
+  process.env.GOOGLE_SCRIPT_WEBHOOK_URL || ""
+).trim();
 const FRONTEND_APP_URL = String(process.env.FRONTEND_APP_URL || "").trim();
 const FRONTEND_RESET_URL =
   process.env.FRONTEND_RESET_URL ||
@@ -209,6 +212,13 @@ function getResolvedEmailProvider() {
   if (EMAIL_PROVIDER === "smtp" || EMAIL_PROVIDER === "resend") {
     return EMAIL_PROVIDER;
   }
+  if (
+    EMAIL_PROVIDER === "google_script" ||
+    EMAIL_PROVIDER === "apps_script" ||
+    EMAIL_PROVIDER === "google_apps_script"
+  ) {
+    return "google_script";
+  }
   return "auto";
 }
 
@@ -223,6 +233,79 @@ function buildResendMessage(message = {}) {
     ...safeMessage,
     from: getResendFromAddress(),
   };
+}
+
+function htmlToPlainText(value) {
+  return String(value || "")
+    .replace(/<\s*br\s*\/?>/gi, "\n")
+    .replace(/<\/\s*p\s*>/gi, "\n\n")
+    .replace(/<[^>]*>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, "\"")
+    .replace(/&#39;/gi, "'")
+    .trim();
+}
+
+async function sendViaGoogleScript({ to, subject, text, html }) {
+  if (!GOOGLE_SCRIPT_WEBHOOK_URL) {
+    throw new Error(
+      "Google Apps Script webhook is not configured. Set GOOGLE_SCRIPT_WEBHOOK_URL in environment variables."
+    );
+  }
+  if (typeof fetch !== "function") {
+    throw new Error("Global fetch is not available in this Node runtime for webhook email delivery.");
+  }
+
+  const toList = Array.isArray(to)
+    ? to.map((entry) => String(entry || "").trim()).filter((entry) => Boolean(entry))
+    : [String(to || "").trim()].filter((entry) => Boolean(entry));
+  if (!toList.length) {
+    throw new Error("Webhook payload requires at least one recipient.");
+  }
+
+  const bodyText = String(text || "").trim() || htmlToPlainText(html) || " ";
+  const response = await fetch(GOOGLE_SCRIPT_WEBHOOK_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      to: toList.join(","),
+      subject: String(subject || "").trim() || "Streak Up Notification",
+      body: bodyText,
+    }),
+  });
+
+  let responseText = "";
+  try {
+    responseText = await response.text();
+  } catch {
+    responseText = "";
+  }
+
+  if (!response.ok) {
+    const shortResponse = String(responseText || "").trim().slice(0, 220);
+    throw new Error(
+      `Google Apps Script webhook request failed (${response.status}).${shortResponse ? ` ${shortResponse}` : ""}`
+    );
+  }
+
+  let parsedResponse = null;
+  if (responseText) {
+    try {
+      parsedResponse = JSON.parse(responseText);
+    } catch {
+      parsedResponse = null;
+    }
+  }
+
+  if (parsedResponse && parsedResponse.success === false) {
+    const errorMessage = String(parsedResponse.error || "unknown webhook error").trim();
+    throw new Error(`Google Apps Script webhook error: ${errorMessage || "unknown webhook error"}`);
+  }
 }
 
 async function sendViaResend({ to, subject, text, html, from }) {
@@ -280,6 +363,11 @@ async function sendEmailMessage(message) {
     return;
   }
 
+  if (provider === "google_script") {
+    await sendViaGoogleScript(message);
+    return;
+  }
+
   if (provider === "smtp") {
     const transporter = getMailTransporter();
     await transporter.sendMail(message);
@@ -296,8 +384,13 @@ async function sendEmailMessage(message) {
         await sendViaResend(buildResendMessage(message));
         return;
       }
+      if (GOOGLE_SCRIPT_WEBHOOK_URL) {
+        console.warn("SMTP connectivity failed; falling back to Google Apps Script webhook.");
+        await sendViaGoogleScript(message);
+        return;
+      }
       throw new Error(
-        "SMTP connection failed. On Render free plan SMTP ports are blocked. Set RESEND_API_KEY for API-based email delivery."
+        "SMTP connection failed. On Render free plan SMTP ports are blocked. Set RESEND_API_KEY or GOOGLE_SCRIPT_WEBHOOK_URL for API-based email delivery."
       );
     }
     throw smtpError;
@@ -2722,6 +2815,64 @@ app.delete("/api/habits/:id", requireAuth, async (req, res) => {
     return res.json({ message: "Streak deleted.", id: habitId });
   } catch (err) {
     return res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/send-email", async (req, res) => {
+  const googleScriptUrl =
+    GOOGLE_SCRIPT_WEBHOOK_URL ||
+    "https://script.google.com/macros/s/AKfycbzMKm4wdFlshWl7UfRrjqj5Q3ex7I2YsvhZa9k2vGherhGZc0lrDbhLFrG6R2thWq_98w/exec";
+  const { to, subject, body } = req.body || {};
+
+  if (!to || !subject || !body) {
+    return res.status(400).json({
+      success: false,
+      message: "Missing required fields: to, subject, or body",
+    });
+  }
+
+  try {
+    const response = await fetch(googleScriptUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        to: String(to),
+        subject: String(subject),
+        body: String(body),
+      }),
+    });
+
+    const responseText = await response.text();
+    let result = {};
+    try {
+      result = responseText ? JSON.parse(responseText) : {};
+    } catch {
+      result = {};
+    }
+
+    if (!response.ok) {
+      return res.status(500).json({
+        success: false,
+        error: result.error || `Webhook failed with status ${response.status}`,
+      });
+    }
+
+    if (result.success === false) {
+      return res.status(500).json({ success: false, error: result.error || "Webhook rejected request" });
+    }
+
+    return res
+      .status(200)
+      .json({ success: true, message: "Email sent successfully via Google Webhook!" });
+  } catch (error) {
+    console.error("Webhook Error:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to reach Google Script",
+      details: error.message,
+    });
   }
 });
 

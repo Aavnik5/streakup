@@ -20,7 +20,7 @@ This backend now runs a server-side reminder engine (email-based), so reminders 
 - `REMINDER_ENGINE_ENABLED` (`1` default, set `0` to disable)
 - `REMINDER_TICK_SECONDS` (`60` default, minimum `15`)
 - `REMINDER_LOG_RETENTION_DAYS` (`90` default, minimum `7`)
-- `EMAIL_VERIFICATION_REQUIRED` (`0` default, set `1` to enforce OTP verification before login)
+- `EMAIL_VERIFICATION_REQUIRED` (`1` default, set `0` to disable OTP verification before login)
 - Existing mail settings are required for delivery:
   - `GMAIL_USER`
   - `GMAIL_APP_PASSWORD`
@@ -31,10 +31,11 @@ This backend now runs a server-side reminder engine (email-based), so reminders 
     - `SMTP_SECURE` (`1` default)
     - `SMTP_FAMILY` (`4` default)
   - Provider selection:
-    - `EMAIL_PROVIDER` (`auto` default, `smtp`, or `resend`)
+    - `EMAIL_PROVIDER` (`auto` default, `smtp`, `resend`, or `google_script`)
     - `RESEND_API_KEY` (required for `resend`, and for `auto` fallback on SMTP failure)
     - `RESEND_FROM` (default `onboarding@resend.dev`)
     - `RESEND_API_URL` (default `https://api.resend.com/emails`)
+    - `GOOGLE_SCRIPT_WEBHOOK_URL` (required for `google_script`, and for `auto` fallback on SMTP failure)
 
 ### Reminder APIs
 
@@ -53,5 +54,5 @@ Health check includes reminder engine status:
 ### Notes
 
 - Delivery is email-based in this version.
-- Render free plan blocks outbound SMTP ports, so use `EMAIL_PROVIDER=resend` for OTP/recovery/reminders.
+- Render free plan blocks outbound SMTP ports, so use `EMAIL_PROVIDER=resend` or `EMAIL_PROVIDER=google_script` for OTP/recovery/reminders.
 - On free hosting plans that sleep services, background reliability may still degrade while instance is asleep.
