@@ -139,6 +139,74 @@
       .status { min-height: 1.2rem; margin-top: 0.7rem; font-size: 0.85rem; color: var(--muted); }
       .status.error { color: var(--danger); }
       .status.success { color: var(--ok); }
+      .install-banner {
+        margin-top: 0.42rem;
+        border: 1px solid #bfe6da;
+        border-radius: 18px;
+        background:
+          radial-gradient(circle at 0% -40%, rgba(20, 180, 143, 0.28), transparent 55%),
+          linear-gradient(150deg, #f8fffc 0%, #eaf7f2 100%);
+        box-shadow: 0 12px 24px rgba(13, 70, 57, 0.08);
+        padding: 0.82rem 0.84rem;
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        gap: 0.72rem;
+        align-items: center;
+      }
+      .install-banner[hidden] { display: none !important; }
+      .install-icon {
+        width: 42px;
+        height: 42px;
+        border-radius: 12px;
+        background: linear-gradient(145deg, #0f9d7d, #14b48f);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.38);
+        display: grid;
+        place-items: center;
+        color: #ffffff;
+      }
+      .install-icon svg {
+        width: 22px;
+        height: 22px;
+        display: block;
+      }
+      .install-copy {
+        display: grid;
+        gap: 0.18rem;
+        min-width: 0;
+      }
+      .install-title {
+        margin: 0;
+        font-size: 0.88rem;
+        font-weight: 800;
+        color: #12443a;
+        letter-spacing: 0.01em;
+      }
+      .install-status {
+        margin: 0;
+        font-size: 0.77rem;
+        color: #4f746d;
+        line-height: 1.45;
+      }
+      .install-status.success { color: #127c61; }
+      .install-status.error { color: var(--danger); }
+      .install-cta-btn {
+        min-width: 128px;
+        min-height: 40px;
+        border-radius: 12px;
+        color: #fff;
+        font-size: 0.8rem;
+        background: linear-gradient(135deg, #0f9d7d, #14b48f);
+        box-shadow: 0 10px 20px rgba(15, 157, 125, 0.28);
+      }
+      @media (max-width: 460px) {
+        .install-banner {
+          grid-template-columns: auto minmax(0, 1fr);
+        }
+        .install-cta-btn {
+          grid-column: 1 / -1;
+          width: 100%;
+        }
+      }
 
       .tab-section { display: none; margin-top: 0.95rem; }
       .tab-section.active { display: block; }
@@ -2996,8 +3064,18 @@
       </header>
 
       <p id="globalStatus" class="status" aria-live="polite"></p>
-      <button id="installAppQuickBtn" class="btn btn-soft" type="button" style="width: 100%; margin-top: 0.2rem;">Install App</button>
-      <p id="installQuickState" class="status" style="margin-top: 0.38rem;">Install: checking...</p>
+      <section id="installBanner" class="install-banner" aria-live="polite" hidden>
+        <div class="install-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" role="presentation">
+            <path fill="currentColor" d="M12 3a1 1 0 0 1 1 1v8.56l2.3-2.3a1 1 0 1 1 1.4 1.42l-4 3.97a1 1 0 0 1-1.4 0l-4-3.97a1 1 0 0 1 1.4-1.42l2.3 2.3V4a1 1 0 0 1 1-1Zm-7 14a1 1 0 0 1 1 1v1h12v-1a1 1 0 1 1 2 0v2a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-2a1 1 0 0 1 1-1Z"></path>
+          </svg>
+        </div>
+        <div class="install-copy">
+          <p class="install-title">Install Streak Up App</p>
+          <p id="installQuickState" class="install-status">Checking install availability...</p>
+        </div>
+        <button id="installAppQuickBtn" class="btn install-cta-btn" type="button">Install App</button>
+      </section>
 
       <section id="sectionDashboard" class="tab-section active">
         <div class="summary">
@@ -3217,8 +3295,6 @@
           <p id="notificationState" class="status" style="margin-top: 0.62rem;">Permission: unknown</p>
           <button id="allowNotificationBtn" class="btn btn-ghost" type="button" style="width: 100%;">Allow Notifications</button>
           <button id="testNotificationBtn" class="btn btn-soft" type="button" style="width: 100%; margin-top: 0.55rem;">Send Test Notification</button>
-          <button id="installAppBtn" class="btn btn-ghost" type="button" style="width: 100%; margin-top: 0.55rem;">Install App</button>
-          <p id="installState" class="status" style="margin-top: 0.46rem;">Install: checking...</p>
           <button id="profileLogoutBtn" class="btn btn-main" type="button" style="width: 100%; margin-top: 0.55rem;">Logout</button>
           <p id="profileStatus" class="status" aria-live="polite"></p>
         </article>
@@ -3557,8 +3633,7 @@
       const notificationState = document.getElementById("notificationState");
       const allowNotificationBtn = document.getElementById("allowNotificationBtn");
       const testNotificationBtn = document.getElementById("testNotificationBtn");
-      const installAppBtn = document.getElementById("installAppBtn");
-      const installState = document.getElementById("installState");
+      const installBanner = document.getElementById("installBanner");
       const installAppQuickBtn = document.getElementById("installAppQuickBtn");
       const installQuickState = document.getElementById("installQuickState");
       const profileLogoutBtn = document.getElementById("profileLogoutBtn");
@@ -3578,6 +3653,8 @@
       let celebrationConfetti = null;
       let celebrationFadeTimer = null;
       let deferredInstallPromptEvent = null;
+      const installMarkerStorageKey = "streakup_install_marker_v1";
+      let installMarkedDone = false;
 
       function getToken() {
         return localStorage.getItem("streak_token") || "";
@@ -3617,20 +3694,42 @@
       }
 
       function setInstallStatus(message, type = "") {
-        if (!installState) {
-          if (installQuickState) {
-            setStatus(installQuickState, message, type);
-          }
+        if (!installQuickState) {
           return;
         }
-        setStatus(installState, message, type);
-        if (installQuickState) {
-          setStatus(installQuickState, message, type);
+        installQuickState.textContent = String(message || "").trim();
+        installQuickState.className = `install-status ${type}`.trim();
+      }
+
+      function setInstallVisibility(visible) {
+        if (!installBanner) {
+          return;
         }
+        installBanner.hidden = !visible;
       }
 
       function getInstallButtons() {
-        return [installAppBtn, installAppQuickBtn].filter((button) => Boolean(button));
+        return [installAppQuickBtn].filter((button) => Boolean(button));
+      }
+
+      function readInstallMarker() {
+        try {
+          return localStorage.getItem(installMarkerStorageKey) === "1";
+        } catch {
+          return false;
+        }
+      }
+
+      function writeInstallMarker(installed) {
+        try {
+          if (installed) {
+            localStorage.setItem(installMarkerStorageKey, "1");
+          } else {
+            localStorage.removeItem(installMarkerStorageKey);
+          }
+        } catch {
+          // Ignore storage failures and continue with runtime checks.
+        }
       }
 
       function isRunningStandalone() {
@@ -3650,18 +3749,22 @@
 
       function updateInstallUiState() {
         const installButtons = getInstallButtons();
-        if (!installButtons.length) {
+        if (!installBanner || !installButtons.length) {
           return;
         }
 
-        if (isRunningStandalone()) {
-          installButtons.forEach((button) => {
-            button.disabled = true;
-            button.textContent = "App Installed";
-          });
-          setInstallStatus("Install: already installed on this device.", "success");
+        const runningStandalone = isRunningStandalone();
+        if (runningStandalone) {
+          installMarkedDone = true;
+          writeInstallMarker(true);
+        }
+
+        if (runningStandalone || installMarkedDone) {
+          setInstallVisibility(false);
           return;
         }
+
+        setInstallVisibility(true);
 
         if (deferredInstallPromptEvent) {
           installButtons.forEach((button) => {
@@ -3683,7 +3786,7 @@
 
         installButtons.forEach((button) => {
           button.disabled = true;
-          button.textContent = "Install Not Ready";
+          button.textContent = "Install App";
         });
         setInstallStatus("Install prompt not ready yet. Use app for a while and retry.", "");
       }
@@ -7658,14 +7761,31 @@
       window.addEventListener("beforeinstallprompt", (event) => {
         event.preventDefault();
         deferredInstallPromptEvent = event;
+        installMarkedDone = false;
+        writeInstallMarker(false);
         updateInstallUiState();
       });
 
       window.addEventListener("appinstalled", () => {
         deferredInstallPromptEvent = null;
+        installMarkedDone = true;
+        writeInstallMarker(true);
         updateInstallUiState();
-        setInstallStatus("App installed successfully.", "success");
+        setProfileStatus("App installed successfully.", "success");
       });
+
+      window.addEventListener("pageshow", () => {
+        updateInstallUiState();
+      });
+
+      if (window.matchMedia) {
+        const standaloneMedia = window.matchMedia("(display-mode: standalone)");
+        if (typeof standaloneMedia.addEventListener === "function") {
+          standaloneMedia.addEventListener("change", updateInstallUiState);
+        } else if (typeof standaloneMedia.addListener === "function") {
+          standaloneMedia.addListener(updateInstallUiState);
+        }
+      }
 
       async function handleInstallRequest() {
           if (isRunningStandalone()) {
@@ -7714,6 +7834,11 @@
         startDateInput.value = getTodayDateString();
         reminderEnabledInput.checked = false;
         appReminderToggle.checked = isAppReminderEnabled();
+        installMarkedDone = readInstallMarker();
+        if (isRunningStandalone()) {
+          installMarkedDone = true;
+          writeInstallMarker(true);
+        }
         updateInstallUiState();
         updateReminderTimeField();
         renderReminderControls();
