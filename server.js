@@ -321,7 +321,9 @@ async function sendViaGoogleScript({ to, subject, text, html }) {
       to: toList.join(","),
       subject: String(subject || "").trim() || "Streak Up Notification",
       body: bodyText,
+      textBody: bodyText,
       htmlBody: String(html || "").trim(),
+      html: String(html || "").trim(),
     }),
   });
 
