@@ -2,12 +2,13 @@ name: Keep StreakUps Awake
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
-  workflow_dispatch:
+    - cron: "*/10 * * * *" # Har 10 minute mein trigger hoga
+  workflow_dispatch: # Actions tab se manual run karne ke liye
 
 jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
       - name: Ping StreakUps App
-        run: curl -s https://streakups.onrender.com > /dev/null
+        # Yahan URL ke end mein /ping add kar diya gaya hai
+        run: curl -s https://streakups.onrender.com/ping > /dev/null
