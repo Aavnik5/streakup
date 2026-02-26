@@ -278,6 +278,7 @@ async function sendViaGoogleScript({ to, subject, text, html }) {
       to: toList.join(","),
       subject: String(subject || "").trim() || "Streak Up Notification",
       body: bodyText,
+      htmlBody: String(html || "").trim(),
     }),
   });
 
@@ -435,14 +436,33 @@ function createPasswordResetToken() {
 async function sendEmailVerificationOtp({ email, name, otp }) {
   const safeOtp = escapeHtml(otp);
   const safeMinutes = escapeHtml(EMAIL_OTP_TTL_MINUTES);
+  const textName = String(name || "there").trim() || "there";
+  const plainTextOtpMessage = [
+    `Hi ${textName},`,
+    "",
+    "Welcome to Streak Up.",
+    "Use this one-time code to verify your account:",
+    "",
+    `      ${otp}`,
+    "",
+    `This OTP expires in ${EMAIL_OTP_TTL_MINUTES} minutes.`,
+    "",
+    "Security tips:",
+    "- Never share this OTP with anyone.",
+    "- Streak Up team will never ask for this code.",
+    "",
+    "If you did not create this account, you can safely ignore this email.",
+    "",
+    "Streak Up Team",
+  ].join("\n");
   const html = buildBrandedEmailHtml({
     preheader: "Verify your Streak Up account with OTP",
     title: "Email Verification OTP",
-    subtitle: "One quick step before your streak journey starts.",
+    subtitle: "Confirm your account and start building your streak momentum.",
     name,
     contentHtml: `
       <p style="margin:0;font-size:14px;line-height:1.6;color:#35514d;">
-        Use this OTP to verify your account:
+        Use this one-time code to verify your Streak Up account:
       </p>
       <div style="margin:14px 0 10px 0;padding:14px 12px;border-radius:14px;border:1px dashed #89bce6;background:#f3f9ff;text-align:center;">
         <span style="font-size:32px;line-height:1;font-weight:800;letter-spacing:7px;color:#0f8a73;">${safeOtp}</span>
@@ -450,6 +470,11 @@ async function sendEmailVerificationOtp({ email, name, otp }) {
       <p style="margin:0;font-size:13px;line-height:1.5;color:#5f7673;">
         This OTP expires in ${safeMinutes} minutes.
       </p>
+      <div style="margin:12px 0 0 0;padding:10px 12px;border-radius:10px;background:#fff8ef;border:1px solid #f2dbc1;">
+        <p style="margin:0;font-size:12px;line-height:1.6;color:#7c5a32;">
+          Security note: Never share this code with anyone. Streak Up team will never ask for your OTP.
+        </p>
+      </div>
     `,
     footer: "If you did not create this account, you can ignore this email.",
   });
@@ -458,14 +483,86 @@ async function sendEmailVerificationOtp({ email, name, otp }) {
     await sendEmailMessage({
       from: MAIL_FROM,
       to: email,
-      subject: "Your Streak Up verification OTP",
-      text: `Hi ${name},\nUse this OTP to verify your Streak Up account: ${otp}\nThis OTP expires in ${EMAIL_OTP_TTL_MINUTES} minutes.`,
+      subject: "Verify your Streak Up account",
+      text: plainTextOtpMessage,
       html,
     });
   } catch (error) {
     console.error("Failed to send verification OTP:", error);
     if (isSmtpConnectivityError(error)) {
       throw new Error("OTP email service is temporarily unavailable. Please try again in 1-2 minutes.");
+    }
+    throw error;
+  }
+}
+
+async function sendPasswordResetOtp({ email, name, otp }) {
+  const safeOtp = escapeHtml(otp);
+  const safeMinutes = escapeHtml(EMAIL_OTP_TTL_MINUTES);
+  const textName = String(name || "there").trim() || "there";
+  const resetPageUrl = `${FRONTEND_RESET_URL}?email=${encodeURIComponent(email)}`;
+  const safeResetPageUrl = escapeHtml(resetPageUrl);
+  const plainTextResetOtpMessage = [
+    `Hi ${textName},`,
+    "",
+    "Use this OTP to reset your Streak Up password:",
+    "",
+    `      ${otp}`,
+    "",
+    `This OTP expires in ${EMAIL_OTP_TTL_MINUTES} minutes.`,
+    "",
+    `Open reset page: ${resetPageUrl}`,
+    "",
+    "Security tips:",
+    "- Never share this OTP with anyone.",
+    "- Streak Up team will never ask for this code.",
+    "",
+    "If you did not request this, you can safely ignore this email.",
+    "",
+    "Streak Up Team",
+  ].join("\n");
+
+  const html = buildBrandedEmailHtml({
+    preheader: "Use OTP to reset your Streak Up password",
+    title: "Password Reset OTP",
+    subtitle: "Enter this OTP on the reset password screen.",
+    name,
+    contentHtml: `
+      <p style="margin:0;font-size:14px;line-height:1.6;color:#35514d;">
+        Use this OTP to reset your Streak Up password:
+      </p>
+      <div style="margin:14px 0 10px 0;padding:14px 12px;border-radius:14px;border:1px dashed #89bce6;background:#f3f9ff;text-align:center;">
+        <span style="font-size:32px;line-height:1;font-weight:800;letter-spacing:7px;color:#0f8a73;">${safeOtp}</span>
+      </div>
+      <p style="margin:0;font-size:13px;line-height:1.5;color:#5f7673;">
+        This OTP expires in ${safeMinutes} minutes.
+      </p>
+      <div style="margin:12px 0 0 0;">
+        <a href="${safeResetPageUrl}" style="display:inline-block;padding:11px 18px;border-radius:11px;background:linear-gradient(135deg,#0f9d7d 0%,#2089d5 100%);color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;">
+          Open Reset Page
+        </a>
+      </div>
+      <div style="margin:12px 0 0 0;padding:10px 12px;border-radius:10px;background:#fff8ef;border:1px solid #f2dbc1;">
+        <p style="margin:0;font-size:12px;line-height:1.6;color:#7c5a32;">
+          Security note: Never share this code with anyone. Streak Up team will never ask for your OTP.
+        </p>
+      </div>
+    `,
+    footer: "If you did not request password reset, you can ignore this email.",
+  });
+
+  try {
+    await sendEmailMessage({
+      from: MAIL_FROM,
+      to: email,
+      subject: "Your Streak Up password reset OTP",
+      text: plainTextResetOtpMessage,
+      html,
+    });
+  } catch (error) {
+    console.error("Failed to send password reset OTP:", error);
+    if (isSmtpConnectivityError(error)) {
+      throw new Error("Password reset OTP service is temporarily unavailable. Please try again in 1-2 minutes.");
     }
     throw error;
   }
@@ -1361,6 +1458,25 @@ async function issueEmailOtpForUser({ userId, name, email }) {
   });
 }
 
+async function issuePasswordResetOtpForUser({ userId, name, email }) {
+  const otpData = createEmailOtp();
+
+  await db.execute({
+    sql: `
+      UPDATE users
+      SET emailOtpHash = ?, emailOtpExpiresAt = ?, resetPasswordTokenHash = NULL, resetPasswordExpiresAt = NULL
+      WHERE id = ?
+    `,
+    args: [otpData.otpHash, otpData.expiresAt, userId],
+  });
+
+  await sendPasswordResetOtp({
+    email,
+    name,
+    otp: otpData.otp,
+  });
+}
+
 async function issuePasswordResetForUser({ userId, name, email }) {
   const reset = createPasswordResetToken();
 
@@ -2220,7 +2336,7 @@ app.post("/api/auth/forgot-password", async (req, res) => {
     }
 
     const genericMessage =
-      "If this account exists, password reset instructions have been sent.";
+      "If this account exists, a password reset OTP has been sent.";
 
     const userResult = await db.execute({
       sql: `
@@ -2237,20 +2353,11 @@ app.post("/api/auth/forgot-password", async (req, res) => {
     }
 
     const user = userResult.rows[0];
-
-    if (!EMAIL_VERIFICATION_REQUIRED || Number(user.isVerified || 0) === 1) {
-      await issuePasswordResetForUser({
-        userId: Number(user.id),
-        name: String(user.name || "User"),
-        email: String(user.email || email),
-      });
-    } else {
-      await issueEmailOtpForUser({
-        userId: Number(user.id),
-        name: String(user.name || "User"),
-        email: String(user.email || email),
-      });
-    }
+    await issuePasswordResetOtpForUser({
+      userId: Number(user.id),
+      name: String(user.name || "User"),
+      email: String(user.email || email),
+    });
 
     return res.json({ message: genericMessage });
   } catch (err) {
@@ -2261,49 +2368,122 @@ app.post("/api/auth/forgot-password", async (req, res) => {
 app.post("/api/auth/reset-password", async (req, res) => {
   try {
     const token = String(req.body?.token || "").trim();
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    const otp = String(req.body?.otp || "").trim();
     const password = String(req.body?.password || "");
 
-    if (!token || !password) {
-      return res.status(400).json({ error: "Token and password are required" });
+    if (!password) {
+      return res.status(400).json({ error: "Password is required" });
     }
 
     if (password.length < 6) {
       return res.status(400).json({ error: "Password must be at least 6 characters" });
     }
 
-    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+    const passwordHash = hashPassword(password);
+
+    if (token) {
+      const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+
+      const userResult = await db.execute({
+        sql: `
+          SELECT id, resetPasswordExpiresAt
+          FROM users
+          WHERE resetPasswordTokenHash = ?
+          LIMIT 1
+        `,
+        args: [tokenHash],
+      });
+
+      if (userResult.rows.length === 0) {
+        return res.status(400).json({ error: "Invalid reset token" });
+      }
+
+      const user = userResult.rows[0];
+
+      if (!user.resetPasswordExpiresAt || new Date(user.resetPasswordExpiresAt) < new Date()) {
+        return res.status(400).json({ error: "Reset token expired" });
+      }
+
+      await db.execute({
+        sql: `
+          UPDATE users
+          SET passwordHash = ?,
+              resetPasswordTokenHash = NULL,
+              resetPasswordExpiresAt = NULL
+          WHERE id = ?
+        `,
+        args: [passwordHash, user.id],
+      });
+
+      await db.execute({
+        sql: "DELETE FROM sessions WHERE userId = ?",
+        args: [user.id],
+      });
+
+      return res.json({ message: "Password reset successful. Please login again." });
+    }
+
+    if (!email || !otp) {
+      return res.status(400).json({ error: "Email, OTP, and password are required" });
+    }
+
+    if (!isGmailAddress(email)) {
+      return res.status(400).json({ error: "Please use a valid Gmail address" });
+    }
+
+    if (!/^\d{6}$/.test(otp)) {
+      return res.status(400).json({ error: "OTP must be 6 digits" });
+    }
 
     const userResult = await db.execute({
       sql: `
-        SELECT id, resetPasswordExpiresAt
+        SELECT id, emailOtpHash, emailOtpExpiresAt
         FROM users
-        WHERE resetPasswordTokenHash = ?
+        WHERE email = ?
         LIMIT 1
       `,
-      args: [tokenHash],
+      args: [email],
     });
 
     if (userResult.rows.length === 0) {
-      return res.status(400).json({ error: "Invalid reset token" });
+      return res.status(400).json({ error: "Invalid email or OTP" });
     }
 
     const user = userResult.rows[0];
 
-    if (!user.resetPasswordExpiresAt || new Date(user.resetPasswordExpiresAt) < new Date()) {
-      return res.status(400).json({ error: "Reset token expired" });
+    if (!user.emailOtpHash || !user.emailOtpExpiresAt) {
+      return res.status(400).json({ error: "OTP not requested. Please request OTP again." });
     }
 
-    const passwordHash = hashPassword(password);
+    if (new Date(user.emailOtpExpiresAt) < new Date()) {
+      return res.status(400).json({ error: "OTP expired. Please request OTP again." });
+    }
+
+    const candidateHash = crypto.createHash("sha256").update(otp).digest("hex");
+    const savedHashBuffer = Buffer.from(String(user.emailOtpHash), "hex");
+    const candidateHashBuffer = Buffer.from(candidateHash, "hex");
+
+    if (
+      savedHashBuffer.length !== candidateHashBuffer.length ||
+      !crypto.timingSafeEqual(savedHashBuffer, candidateHashBuffer)
+    ) {
+      return res.status(400).json({ error: "Invalid OTP" });
+    }
 
     await db.execute({
       sql: `
         UPDATE users
         SET passwordHash = ?,
+            isVerified = 1,
+            verifiedAt = COALESCE(verifiedAt, ?),
+            emailOtpHash = NULL,
+            emailOtpExpiresAt = NULL,
             resetPasswordTokenHash = NULL,
             resetPasswordExpiresAt = NULL
         WHERE id = ?
       `,
-      args: [passwordHash, user.id],
+      args: [passwordHash, new Date().toISOString(), user.id],
     });
 
     await db.execute({
