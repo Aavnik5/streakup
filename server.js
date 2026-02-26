@@ -29,8 +29,17 @@ const PORT = Number(process.env.PORT || 5000);
 const SESSION_TTL_DAYS = Number(process.env.SESSION_TTL_DAYS || 0);
 const NEVER_EXPIRES_ISO = "9999-12-31T23:59:59.999Z";
 const EMAIL_OTP_TTL_MINUTES = Number(process.env.EMAIL_OTP_TTL_MINUTES || 10);
-const EMAIL_VERIFICATION_REQUIRED =
-  String(process.env.EMAIL_VERIFICATION_REQUIRED || "1").trim() === "1";
+const emailVerificationRequiredRaw = String(
+  process.env.EMAIL_VERIFICATION_REQUIRED || "1"
+)
+  .trim()
+  .toLowerCase();
+const EMAIL_VERIFICATION_REQUIRED = ![
+  "0",
+  "false",
+  "no",
+  "off",
+].includes(emailVerificationRequiredRaw);
 const RESET_PASSWORD_TOKEN_TTL_MINUTES = Number(
   process.env.RESET_PASSWORD_TOKEN_TTL_MINUTES || 30
 );
