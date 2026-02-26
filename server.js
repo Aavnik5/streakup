@@ -148,29 +148,45 @@ function buildBrandedEmailHtml({
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>${safeTitle}</title>
       </head>
-      <body style="margin:0;padding:0;background:#eef5f2;">
+      <body style="margin:0;padding:0;background:#eef7f5;">
         <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">${safePreheader}</div>
-        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#eef5f2;padding:20px 10px;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#eef7f5;padding:24px 12px;">
           <tr>
             <td align="center">
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:620px;">
                 <tr>
-                  <td style="border-radius:20px 20px 0 0;background:linear-gradient(135deg,#0f9d7d 0%,#2089d5 75%);padding:24px 26px;color:#ffffff;">
-                    <p style="margin:0 0 8px 0;font-size:12px;letter-spacing:1.6px;font-weight:700;text-transform:uppercase;opacity:0.92;">Streak Up</p>
-                    <h1 style="margin:0;font-size:28px;line-height:1.2;font-weight:800;">${safeTitle}</h1>
-                    <p style="margin:10px 0 0 0;font-size:14px;line-height:1.5;opacity:0.95;">${safeSubtitle}</p>
+                  <td style="border:1px solid #d5e7e0;border-bottom:none;border-radius:18px 18px 0 0;background:#ffffff;padding:16px 22px;">
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                      <tr>
+                        <td width="36" style="vertical-align:middle;">
+                          <span style="display:inline-block;width:32px;height:32px;border-radius:8px;background:#0f8a73;color:#ffffff;font-size:13px;line-height:32px;text-align:center;font-weight:800;font-family:Arial,sans-serif;">SU</span>
+                        </td>
+                        <td style="padding-left:10px;vertical-align:middle;">
+                          <p style="margin:0;font-size:27px;line-height:1.05;font-family:Georgia,'Times New Roman',serif;color:#16312e;font-weight:700;">Streak Up</p>
+                        </td>
+                      </tr>
+                    </table>
                   </td>
                 </tr>
                 <tr>
-                  <td style="border:1px solid #d5e5df;border-top:none;border-radius:0 0 20px 20px;background:#ffffff;padding:24px 26px;">
-                    <p style="margin:0 0 12px 0;font-size:15px;line-height:1.5;color:#16312e;">Hi ${safeName},</p>
+                  <td style="background:#0f8a73;padding:28px 24px;color:#ffffff;text-align:center;">
+                    <p style="margin:0 0 8px 0;font-size:11px;letter-spacing:2px;font-weight:700;text-transform:uppercase;opacity:0.92;font-family:Arial,sans-serif;">Account Security</p>
+                    <h1 style="margin:0;font-size:34px;line-height:1.2;font-weight:800;font-family:Arial,sans-serif;">${safeTitle}</h1>
+                    <p style="margin:10px 0 0 0;font-size:15px;line-height:1.55;opacity:0.95;font-family:Arial,sans-serif;">${safeSubtitle}</p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="border:1px solid #d5e7e0;border-top:none;border-radius:0 0 18px 18px;background:#ffffff;padding:24px 22px;">
+                    <p style="margin:0 0 12px 0;font-size:16px;line-height:1.55;color:#16312e;font-family:Arial,sans-serif;">Hi ${safeName},</p>
                     ${contentHtml}
-                    <p style="margin:18px 0 0 0;font-size:12px;line-height:1.5;color:#6c8280;">${safeFooter}</p>
+                    <div style="margin:18px 0 0 0;padding:10px 12px;border-radius:10px;background:#f4fbf8;border:1px solid #d5ebe2;">
+                      <p style="margin:0;font-size:12px;line-height:1.6;color:#587773;font-family:Arial,sans-serif;">${safeFooter}</p>
+                    </div>
                   </td>
                 </tr>
                 <tr>
                   <td style="padding:12px 6px 0 6px;text-align:center;">
-                    <p style="margin:0;font-size:11px;line-height:1.5;color:#7f9491;">Built with consistency, one day at a time.</p>
+                    <p style="margin:0;font-size:11px;line-height:1.5;color:#7f9491;font-family:Arial,sans-serif;">Built with consistency, one day at a time.</p>
                   </td>
                 </tr>
               </table>
@@ -179,6 +195,33 @@ function buildBrandedEmailHtml({
         </table>
       </body>
     </html>
+  `;
+}
+
+function buildOtpDigitsHtml(otpValue) {
+  const digits = String(otpValue || "").trim().split("");
+  if (!digits.length) {
+    return `<p style="margin:14px 0 10px 0;font-size:28px;line-height:1;font-weight:800;color:#0f8a73;font-family:Arial,sans-serif;">${escapeHtml(otpValue)}</p>`;
+  }
+
+  const cells = digits
+    .map(
+      (digit) => `
+        <td style="padding:0;">
+          <div style="width:48px;padding:11px 0;border:1px solid #b9d8ce;border-radius:10px;background:#f5fbf8;text-align:center;font-size:28px;line-height:1;font-weight:800;color:#0f8a73;font-family:Arial,sans-serif;">
+            ${escapeHtml(digit)}
+          </div>
+        </td>
+      `
+    )
+    .join("");
+
+  return `
+    <table role="presentation" cellspacing="0" cellpadding="0" style="margin:14px 0 10px 0;border-collapse:separate;border-spacing:8px 0;">
+      <tr>
+        ${cells}
+      </tr>
+    </table>
   `;
 }
 
@@ -434,8 +477,8 @@ function createPasswordResetToken() {
 }
 
 async function sendEmailVerificationOtp({ email, name, otp }) {
-  const safeOtp = escapeHtml(otp);
   const safeMinutes = escapeHtml(EMAIL_OTP_TTL_MINUTES);
+  const otpDigitsHtml = buildOtpDigitsHtml(otp);
   const textName = String(name || "there").trim() || "there";
   const plainTextOtpMessage = [
     `Hi ${textName},`,
@@ -464,9 +507,7 @@ async function sendEmailVerificationOtp({ email, name, otp }) {
       <p style="margin:0;font-size:14px;line-height:1.6;color:#35514d;">
         Use this one-time code to verify your Streak Up account:
       </p>
-      <div style="margin:14px 0 10px 0;padding:14px 12px;border-radius:14px;border:1px dashed #89bce6;background:#f3f9ff;text-align:center;">
-        <span style="font-size:32px;line-height:1;font-weight:800;letter-spacing:7px;color:#0f8a73;">${safeOtp}</span>
-      </div>
+      ${otpDigitsHtml}
       <p style="margin:0;font-size:13px;line-height:1.5;color:#5f7673;">
         This OTP expires in ${safeMinutes} minutes.
       </p>
@@ -497,11 +538,9 @@ async function sendEmailVerificationOtp({ email, name, otp }) {
 }
 
 async function sendPasswordResetOtp({ email, name, otp }) {
-  const safeOtp = escapeHtml(otp);
   const safeMinutes = escapeHtml(EMAIL_OTP_TTL_MINUTES);
+  const otpDigitsHtml = buildOtpDigitsHtml(otp);
   const textName = String(name || "there").trim() || "there";
-  const resetPageUrl = `${FRONTEND_RESET_URL}?email=${encodeURIComponent(email)}`;
-  const safeResetPageUrl = escapeHtml(resetPageUrl);
   const plainTextResetOtpMessage = [
     `Hi ${textName},`,
     "",
@@ -510,8 +549,6 @@ async function sendPasswordResetOtp({ email, name, otp }) {
     `      ${otp}`,
     "",
     `This OTP expires in ${EMAIL_OTP_TTL_MINUTES} minutes.`,
-    "",
-    `Open reset page: ${resetPageUrl}`,
     "",
     "Security tips:",
     "- Never share this OTP with anyone.",
@@ -531,17 +568,10 @@ async function sendPasswordResetOtp({ email, name, otp }) {
       <p style="margin:0;font-size:14px;line-height:1.6;color:#35514d;">
         Use this OTP to reset your Streak Up password:
       </p>
-      <div style="margin:14px 0 10px 0;padding:14px 12px;border-radius:14px;border:1px dashed #89bce6;background:#f3f9ff;text-align:center;">
-        <span style="font-size:32px;line-height:1;font-weight:800;letter-spacing:7px;color:#0f8a73;">${safeOtp}</span>
-      </div>
+      ${otpDigitsHtml}
       <p style="margin:0;font-size:13px;line-height:1.5;color:#5f7673;">
         This OTP expires in ${safeMinutes} minutes.
       </p>
-      <div style="margin:12px 0 0 0;">
-        <a href="${safeResetPageUrl}" style="display:inline-block;padding:11px 18px;border-radius:11px;background:linear-gradient(135deg,#0f9d7d 0%,#2089d5 100%);color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;">
-          Open Reset Page
-        </a>
-      </div>
       <div style="margin:12px 0 0 0;padding:10px 12px;border-radius:10px;background:#fff8ef;border:1px solid #f2dbc1;">
         <p style="margin:0;font-size:12px;line-height:1.6;color:#7c5a32;">
           Security note: Never share this code with anyone. Streak Up team will never ask for your OTP.
