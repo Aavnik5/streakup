@@ -2726,7 +2726,7 @@ app.delete("/api/habits/:id", requireAuth, async (req, res) => {
 });
 
 app.get("/ping", (req, res) => {
-  res.status(200).send("App is awake!");
+  res.status(200).json({ status: "success", message: "StreakUps is awake!" });
 });
 
 app.get("/api/health", (req, res) => {
