@@ -1,4 +1,4 @@
-const CACHE_NAME = "streak-tracker-static-v8";
+const CACHE_NAME = "streak-tracker-static-v9";
 const STATIC_ASSETS = [
   "./",
   "./index.html",
@@ -16,6 +16,7 @@ const STATIC_ASSETS = [
   "./assets/icons/icon-192.png",
   "./assets/icons/icon-512.png",
   "./assets/icons/icon-maskable-512.png",
+  "./assets/lottie/Fire.json",
 ];
 
 self.addEventListener("install", (event) => {

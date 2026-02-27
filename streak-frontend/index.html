@@ -278,50 +278,25 @@
       .visual-wrap {
         position: relative;
         border-radius: 24px;
-        padding: 0.4rem;
-        background: radial-gradient(circle at 18% 12%, rgba(15, 138, 115, 0.15), transparent 58%);
+        padding: 0;
+        display: grid;
+        place-items: center;
       }
 
       .visual-wrap::before {
-        content: "";
-        position: absolute;
-        inset: 0;
-        border-radius: 24px;
-        border: 1px solid rgba(15, 138, 115, 0.2);
-        pointer-events: none;
+        content: none;
       }
 
-      .hero-svg {
-        display: block;
+      .hero-lottie-wrap {
+        width: min(240px, 62vw);
+        aspect-ratio: 500 / 690;
+        margin: 0 auto;
+      }
+
+      .hero-lottie {
         width: 100%;
-        height: auto;
-      }
-
-      .floating-chip {
-        animation: floatY 3.6s ease-in-out infinite;
-      }
-
-      .bar {
-        transform-origin: center bottom;
-        animation: growBar 2.8s ease-in-out infinite;
-      }
-
-      .bar.bar-2 {
-        animation-delay: 0.22s;
-      }
-
-      .bar.bar-3 {
-        animation-delay: 0.42s;
-      }
-
-      .line-track {
-        stroke-dasharray: 460;
-        stroke-dashoffset: 460;
-        animation: drawLine 2.4s ease-out forwards 0.2s;
-      }
-
-      .sparkle {
-        animation: pulseGlow 2.2s ease-in-out infinite;
+        height: 100%;
+        display: block;
       }
 
       @keyframes cardIn {
@@ -352,42 +327,6 @@
         }
         50% {
           transform: translate3d(24px, -20px, 0);
-        }
-      }
-
-      @keyframes floatY {
-        0%,
-        100% {
-          transform: translateY(0px);
-        }
-        50% {
-          transform: translateY(-8px);
-        }
-      }
-
-      @keyframes growBar {
-        0%,
-        100% {
-          transform: scaleY(0.95);
-        }
-        50% {
-          transform: scaleY(1.04);
-        }
-      }
-
-      @keyframes drawLine {
-        to {
-          stroke-dashoffset: 0;
-        }
-      }
-
-      @keyframes pulseGlow {
-        0%,
-        100% {
-          opacity: 0.75;
-        }
-        50% {
-          opacity: 1;
         }
       }
 
@@ -463,61 +402,38 @@
         </div>
 
         <div class="visual-wrap" aria-hidden="true">
-          <svg class="hero-svg" viewBox="0 0 420 320" xmlns="http://www.w3.org/2000/svg" role="img">
-            <defs>
-              <linearGradient id="cardFill" x1="60" y1="42" x2="360" y2="282" gradientUnits="userSpaceOnUse">
-                <stop stop-color="#f6fffb" />
-                <stop offset="1" stop-color="#e7f4ef" />
-              </linearGradient>
-              <linearGradient id="bar1" x1="0" y1="248" x2="0" y2="118" gradientUnits="userSpaceOnUse">
-                <stop stop-color="#0f8a73" />
-                <stop offset="1" stop-color="#35b39b" />
-              </linearGradient>
-              <linearGradient id="bar2" x1="0" y1="248" x2="0" y2="106" gradientUnits="userSpaceOnUse">
-                <stop stop-color="#0f8a73" />
-                <stop offset="1" stop-color="#2fa88f" />
-              </linearGradient>
-              <linearGradient id="bar3" x1="0" y1="248" x2="0" y2="90" gradientUnits="userSpaceOnUse">
-                <stop stop-color="#0f8a73" />
-                <stop offset="1" stop-color="#289a84" />
-              </linearGradient>
-              <linearGradient id="trend" x1="82" y1="206" x2="344" y2="138" gradientUnits="userSpaceOnUse">
-                <stop stop-color="#0f8a73" />
-                <stop offset="1" stop-color="#f1af47" />
-              </linearGradient>
-            </defs>
-
-            <rect x="34" y="28" width="352" height="264" rx="26" fill="url(#cardFill)" stroke="#cae5dc" />
-            <rect x="62" y="56" width="182" height="14" rx="7" fill="#d8ede6" />
-            <rect x="62" y="78" width="126" height="10" rx="5" fill="#e5f3ee" />
-
-            <rect class="bar bar-1" x="80" y="134" width="52" height="114" rx="14" fill="url(#bar1)" />
-            <rect class="bar bar-2" x="154" y="120" width="52" height="128" rx="14" fill="url(#bar2)" />
-            <rect class="bar bar-3" x="228" y="104" width="52" height="144" rx="14" fill="url(#bar3)" />
-
-            <path
-              class="line-track"
-              d="M86 214C121 186 146 189 171 176C198 161 219 161 244 143C268 126 292 124 332 111"
-              stroke="url(#trend)"
-              stroke-width="8"
-              stroke-linecap="round"
-              fill="none"
-            />
-
-            <circle class="sparkle" cx="334" cy="111" r="11" fill="#ffffff" stroke="#f1af47" stroke-width="4" />
-            <circle cx="334" cy="111" r="4" fill="#f1af47" />
-
-            <g class="floating-chip">
-              <rect x="248" y="40" width="120" height="44" rx="13" fill="#ffffff" stroke="#c8e2da" />
-              <path d="M268 62h17" stroke="#0f8a73" stroke-width="4" stroke-linecap="round" />
-              <path d="M300 54l5 5 9-11" stroke="#0f8a73" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
-              <path d="M324 62h24" stroke="#a1bdb5" stroke-width="4" stroke-linecap="round" />
-            </g>
-          </svg>
+          <div class="hero-lottie-wrap">
+            <canvas id="heroLottieCanvas" class="hero-lottie"></canvas>
+          </div>
         </div>
       </section>
     </main>
 
+    <script type="module">
+      import { DotLottie } from "https://cdn.jsdelivr.net/npm/@lottiefiles/dotlottie-web/+esm";
+
+      const heroCanvas = document.getElementById("heroLottieCanvas");
+      if (heroCanvas) {
+        heroCanvas.width = 500;
+        heroCanvas.height = 690;
+        const devicePixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+        window.__heroDotLottie = new DotLottie({
+          canvas: heroCanvas,
+          src: "./assets/lottie/Fire.json",
+          autoplay: true,
+          loop: true,
+          speed: 1,
+          renderConfig: {
+            autoResize: true,
+            devicePixelRatio,
+          },
+          layout: {
+            fit: "contain",
+            align: [0.5, 0.5],
+          },
+        });
+      }
+    </script>
     <script>
       (function initInstallPrompt() {
         const installBtn = document.getElementById("installBtn");
