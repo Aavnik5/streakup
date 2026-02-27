@@ -28,6 +28,17 @@
     <link rel="shortcut icon" href="./assets/icons/favicon-32.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="./assets/icons/apple-touch-icon.png" />
     <title>Streak Up - Build Daily Habits and Track Streaks</title>
+    <script>
+      (function redirectLoggedInUsers() {
+        try {
+          if (localStorage.getItem("streak_token")) {
+            window.location.replace("./dashboard.html");
+          }
+        } catch {
+          // Ignore storage access failures.
+        }
+      })();
+    </script>
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
